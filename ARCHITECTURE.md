@@ -610,6 +610,8 @@ Guidance submitted while the implement step is running sits in the queue until `
 - The agent will pick up the guidance on the next iteration, typically within minutes.
 - The TUI shows queued guidance count so the user knows their input is pending.
 
+**Future:** Add mid-flight cancellation — when guidance arrives during a running implement step, cancel the CLI process via context cancellation and restart the iteration with the guidance injected. This gives the user immediate steering rather than waiting for the current iteration to finish.
+
 #### What Guidance Is Not
 
 | Not This | Use This Instead |
