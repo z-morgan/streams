@@ -1,6 +1,5 @@
 {
-  "database": "dolt",
+  "database": "jsonl",
   "jsonl_export": "issues.jsonl",
-  "backend": "dolt",
-  "dolt_database": "beads_streams"
+  "backend": "jsonl"
 }
