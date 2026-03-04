@@ -37,6 +37,7 @@ internal/
   loop/decompose.go                    — Decompose macro-phase implementation
   loop/coding.go                       — Coding macro-phase implementation
   loop/gates.go                        — Quality gate interface + defaults
+  loop/errors.go                       — LoopError type + ErrorKind enum
   orchestrator/orchestrator.go         — Multi-stream manager
   ui/app.go                            — Root Bubble Tea model
   ui/dashboard.go                      — Dashboard view
@@ -121,6 +122,7 @@ type Stream struct {
     BaseSHA       string      // commit the stream branched from; rebase target
     Branch        string      // e.g. "streams/<stream-id>"
     WorkTree      string      // absolute path to git worktree
+    LastError     *LoopError  // set on error, cleared on resume
     Snapshots     []Snapshot  // append-only
     Guidance      []Guidance  // queued by TUI, drained by loop
     CreatedAt     time.Time
@@ -162,10 +164,17 @@ Each stream gets its own git branch and worktree for isolation:
 // internal/stream/snapshot.go
 
 type Snapshot struct {
+    Phase       string       // macro-phase that produced this snapshot (e.g. "plan", "coding")
     Iteration   int
-    Summary     string       // what the agent did
-    Review      string       // self-review output
+    Summary     string       // CLI result text — final text output from claude -p --output-format json
+    Review      string       // reviewer's text output
     GateResults []GateResult // per-gate pass/fail + detail
+    CostUSD     float64
+    DiffStat    string       // git diff --stat output (coding phase only)
+    CommitSHAs  []string     // commits made this iteration (coding phase only)
+    BeadsClosed []string     // bead IDs closed by implement step
+    BeadsOpened []string     // bead IDs opened by review step
+    Error       *LoopError  // non-nil if iteration ended in error (partial snapshot)
     Timestamp   time.Time
 }
 
@@ -174,6 +183,12 @@ type Guidance struct {
     Timestamp time.Time
 }
 ```
+
+**Summary source:** The `result` field from `--output-format json`. Claude naturally summarizes its work, so this is compact without storing the full tool-call trace.
+
+**No full diffs stored.** Snapshots store commit SHAs and diffstat only. Full diffs are rendered live via `git show <sha>` when the user drills down in the TUI.
+
+**Beads delta** tracks IDs opened/closed per iteration — gives a quick "work done / work remaining" signal without querying beads.
 
 ---
 
@@ -196,12 +211,13 @@ Phases are pluggable — adding a new one means defining its prompts, tools, and
 Each iteration within a macro-phase follows this sequence:
 
 ```
-Implement → Autosquash (coding phase only) → Review → Checkpoint → Guidance
+Implement → Autosquash (coding phase only) → Review → Converge? → Checkpoint → Guidance
 ```
 
 - **Implement step** — the agent acts (drafts a plan, creates beads, writes code — depends on macro-phase).
 - **Autosquash step** — in the coding phase, `git rebase --autosquash` collapses fixup commits so the review step always sees clean history. No-op in other phases.
-- **Review step** — the agent critiques the implement step's output and files beads for improvements.
+- **Review step** — the Go loop counts open children before invoking the review agent, then counts again after. The agent critiques the implement step's output and files beads for improvements. The delta populates `IterationResult`.
+- **Convergence check** — the loop calls `MacroPhase.IsConverged(result)`. Default implementation: `result.OpenChildrenAfter <= result.OpenChildrenBefore` (review didn't add work).
 - **Checkpoint step** — produce a snapshot, persist state.
 - **Guidance step** — drain any queued human guidance, incorporate into next iteration.
 
@@ -215,6 +231,16 @@ type PhaseContext struct {
     Runtime      runtime.Runtime
     WorkDir      string
     Iteration    int
+}
+
+// IterationResult captures the outcome of a single iteration for convergence
+// detection. The Go loop populates this — agents don't produce it directly.
+type IterationResult struct {
+    ReviewText        string   // reviewer's text output
+    OpenChildrenBefore int     // open children count before the review step
+    OpenChildrenAfter  int     // open children count after the review step
+    BeadsClosed       []string // bead IDs closed by implement step
+    BeadsOpened       []string // bead IDs opened by review step
 }
 
 type MacroPhase interface {
@@ -233,15 +259,15 @@ Pairing mode forces `TransitionMode` to always return `pause` regardless of what
 
 ### Macro-Phase Behaviors
 
-**Plan** — The implement agent drafts/revises a plan file (`plan.md` in the working directory). The review agent reads the plan and files beads for suggested changes. The implement agent addresses those beads, updates the plan, and closes them. Converges when review files zero beads. No commits — the plan file is working state. Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
+**Plan** — The implement agent drafts/revises a plan file (`plan.md` in the working directory). The review agent reads the plan and files beads for suggested changes. The implement agent addresses those beads, updates the plan, and closes them. Converges when open children count doesn't increase after a review step. No commits — the plan file is working state. Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
 
-**Decompose** — The implement agent reads the converged plan and creates ordered child beads — one per logical step in the coding phase. The review agent checks scoping, ordering, and gaps. Converges when review is satisfied with the decomposition. Output: a set of ordered, actionable beads that become the coding phase's work queue. Tool restrictions: both get `Bash,Read,Glob,Grep` (decompose doesn't write code).
+**Decompose** — The implement agent reads the converged plan and creates ordered child beads — one per logical step in the coding phase. The review agent checks scoping, ordering, and gaps. Converges when open children count doesn't increase after a review step. Output: a set of ordered, actionable beads that become the coding phase's work queue. Tool restrictions: both get `Bash,Read,Glob,Grep` (decompose doesn't write code).
 
-**Coding** — First pass: the implement agent works through step beads in order, committing as each is closed. Subsequent passes: the review agent files new beads (referencing the relevant commit in the description), the implement agent addresses them with `git commit --fixup=<sha>`. Before each review step, `git rebase --autosquash` collapses fixup commits so the reviewer always sees clean history. Converges when the review agent files zero new beads against clean history. Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
+**Coding** — First pass: the implement agent works through step beads in order, committing as each is closed. Subsequent passes: the review agent files new beads (referencing the relevant commit in the description), the implement agent addresses them with `git commit --fixup=<sha>`. Before each review step, `git rebase --autosquash` collapses fixup commits so the reviewer always sees clean history. Converges when open children count doesn't increase after a review step (i.e., review files zero new beads against clean history). Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
 
 ### Design Decisions
 
-**Stay on Claude Code CLI.** The loop wraps the `claude` CLI rather than calling the Anthropic API directly. This keeps the same toolchain the team uses and avoids rebuilding Claude Code's tool layer. The CLI's `--allowedTools` flag pre-approves specific tools per invocation, eliminating permission prompts without requiring `--dangerously-skip-permissions`.
+**Stay on Claude Code CLI.** The loop wraps the `claude` CLI rather than calling the Anthropic API directly. This keeps the same toolchain the team uses and avoids rebuilding Claude Code's tool layer. The CLI's `--allowedTools` flag pre-approves specific tools per invocation, and `--permission-mode dontAsk` silently blocks anything not in the allow list — no permission prompts, no hanging.
 
 **Fresh session per iteration.** Each CLI invocation starts a new session (no `--resume`). This avoids context bloat — after several iterations of tool calls, file reads, and edits, the conversation history becomes noise. The agent reads the codebase fresh each iteration, which keeps context honest and grounded in reality.
 
@@ -262,14 +288,14 @@ Both agents interact with beads directly — the Go orchestrator creates the par
 | Implement | `Bash,Read,Edit,Write,Glob,Grep` | Full access to build things (varies by macro-phase) |
 | Review | `Bash,Read,Glob,Grep` | Read-only — no `Edit`/`Write` — enforced at tool level |
 
-Both steps get `Bash` for running `bd` commands and tests. `--permission-mode acceptEdits` auto-approves file edits as belt-and-suspenders for the implement step.
+Both steps get `Bash` for running `bd` commands and tests. `--permission-mode dontAsk` ensures no tool hangs waiting for approval — tools in `--allowedTools` run freely, everything else is silently denied. Note: `acceptEdits` only auto-approves file edits, not Bash; `dontAsk` is required for fully autonomous operation.
 
 **Key CLI flags per invocation:**
 
 ```
 claude -p \
   --output-format json \
-  --permission-mode acceptEdits \
+  --permission-mode dontAsk \
   --allowedTools "Bash,Read,Edit,Write,Glob,Grep" \
   --append-system-prompt "Phase-specific instructions..." \
   --max-budget-usd 2.00 \
@@ -350,38 +376,23 @@ Each macro-phase provides implement and review prompts. The prompts are injected
 >
 > File child issues for any adjustments needed. If the decomposition is ready, respond with exactly: "No further improvements needed."
 
-**Coding phase — implement prompt (first pass):**
+**Coding phase — implement prompt:**
 
-> You are implementing a software task step by step. Each step is a child beads issue under the parent.
+> You are implementing a software task. Work items are tracked as child beads issues under the parent.
 >
 > Task: {task description}
 > Parent issue: {beads parent ID}
 >
 > Steps:
 > 1. Run: bd show {parent_id} --children
-> 2. Work through open child issues in order.
-> 3. For each: implement the change, run tests, commit with a descriptive message, then close the issue with bd close.
+> 2. For each open child issue, determine the commit strategy from its content:
+>    - **Step issue** (title like "Step N: ..."): Implement the change, run tests, commit with a descriptive message.
+>    - **Review feedback** (description references a commit SHA): Make the fix and create a fixup commit targeting the original: git commit --fixup=<sha>
+> 3. Close each child issue with bd close after addressing it.
 >
 > Rules:
 > - One commit per child issue.
-> - Do not create new beads issues.
-> - Run tests before each commit.
-
-**Coding phase — implement prompt (refinement pass):**
-
-> You are addressing review feedback on an implementation. The feedback is tracked as child issues under the parent beads issue.
->
-> Task: {task description}
-> Parent issue: {beads parent ID}
->
-> Steps:
-> 1. Run: bd show {parent_id} --children
-> 2. For each open child issue: read the description (it references the relevant commit), make the fix, and create a fixup commit targeting the original: git commit --fixup=<sha>
-> 3. Close the child issue with bd close.
->
-> Rules:
-> - Use fixup commits, not regular commits.
-> - Run tests after all changes.
+> - Run tests before committing.
 > - Do not create new beads issues.
 
 **Coding phase — review prompt:**
@@ -433,7 +444,73 @@ Default gates (parsed from review output):
 - **Readability** — would a new developer understand this without comments?
 - **Hindsight check** — knowing what I know now, would I approach this differently?
 
-Convergence is detected by the review agent's output. When the review files zero new child issues (checked by the Go loop via `bd show <parent> --children --status=open`), the macro-phase has converged and the stream's `Converged` flag is set. The loop does not auto-stop — it either transitions to the next macro-phase or pauses for human input depending on mode.
+**Convergence detection** is performed by the Go loop, not by parsing agent output. The loop counts open children before and after each review step via `bd show <parent> --children --status=open`. If the count did not increase, the phase has converged — the review found nothing to improve. The loop passes these counts to `MacroPhase.IsConverged(result)` via `IterationResult`, and the phase sets the stream's `Converged` flag. The "No further improvements needed" string in review prompts is guidance to the agent (so it doesn't hallucinate issues when satisfied), not a signal parsed by Go. The loop does not auto-stop — it either transitions to the next macro-phase or pauses for human input depending on mode.
+
+### Error Handling
+
+```go
+// internal/loop/errors.go
+
+type ErrorKind int
+const (
+    ErrRuntime    ErrorKind = iota // CLI exited non-zero (crash, timeout)
+    ErrBudget                      // Budget limit hit (specific runtime case)
+    ErrAutosquash                  // git rebase --autosquash failed (merge conflict)
+    ErrNoProgress                  // Implement step closed zero beads
+    ErrInfra                       // Disk, git worktree, beads CLI failure
+)
+
+type LoopError struct {
+    Kind    ErrorKind
+    Step    IterStep   // which step failed
+    Message string     // one-line human summary
+    Detail  string     // stderr, conflict file list, etc.
+}
+```
+
+`ErrBudget` is split from `ErrRuntime` because the user action differs (increase budget vs. retry). Detection: parse stderr for "budget exceeded" or equivalent keyword when the CLI exits non-zero.
+
+#### Error detection
+
+| Scenario | Step | ErrorKind | Detection |
+|----------|------|-----------|-----------|
+| CLI exits non-zero | Implement or Review | `ErrRuntime` | `exec.ExitError` from `Runtime.Run()` |
+| Budget exceeded | Implement or Review | `ErrBudget` | Parse stderr for "budget" keyword + non-zero exit |
+| Autosquash fails | Autosquash (BeforeReview) | `ErrAutosquash` | Non-zero exit from `git rebase --autosquash`; detail = conflicting file list |
+| No beads closed | After Implement | `ErrNoProgress` | Compare open child count before/after implement step |
+| Disk/git/beads failure | Any | `ErrInfra` | Catch-all for non-Runtime errors (file I/O, git commands, bd CLI) |
+
+#### Loop behavior on error
+
+On any error during the iteration cycle:
+
+1. Build a `LoopError` with kind, step, message, detail.
+2. Create an error snapshot (partial — only fields available up to the failure point).
+3. Set `stream.LastError = &loopError`.
+4. Set `stream.Status = StatusPaused`.
+5. Persist state (checkpoint).
+6. Send `ErrorEvent{StreamID, LoopError}` to TUI.
+7. Return from the loop goroutine.
+
+**No automatic retries in v1.** Every error pauses the stream. The user always inspects what happened and decides. Automatic retries can be layered on later for specific `ErrorKind` values.
+
+#### Restart semantics
+
+When the user resumes a paused stream (presses `s`):
+
+1. Clear `stream.LastError`.
+2. Set `stream.Status = StatusRunning`.
+3. Restart the iteration **from the beginning** (Implement step).
+
+Why restart the whole iteration instead of the failed step:
+- Implement is idempotent — it reads open beads and works on them. If some were already closed before the error, the re-run just sees fewer open beads.
+- Avoids complexity of checkpointing mid-iteration step state.
+- For autosquash failures after a successful implement, the re-run will re-do implement (harmless — beads are already closed) and then retry autosquash after the user has resolved conflicts.
+
+#### TUI error display
+
+- **Detail view:** When `stream.LastError != nil`, render an error block above the snapshot list showing Kind, Step, Message, and (expandable) Detail.
+- **Dashboard:** Paused-with-error streams show a distinct indicator (e.g., `!` or red status) vs. paused-by-user streams.
 
 ---
 
@@ -465,21 +542,21 @@ Responsibilities:
 
 | View | Purpose |
 |------|---------|
-| **Dashboard** | Stream list with cursor. Shows name, phase indicator, iteration count, gate summary, convergence flag. |
-| **Detail** | Snapshot inspector for a single stream. Navigate snapshots with left/right. Shows summary, review, gate results. |
+| **Dashboard** | Stream list with cursor. One row per stream: name, current phase, iteration count. Minimal — scan status at a glance. |
+| **Detail** | Two-pane layout. Left pane: vertical list of all snapshots across all phases (e.g., "Plan 1", "Plan 2", "Coding 1"...). Right pane: selected snapshot's details (summary, review, diffstat, gates). v1 highlights the latest snapshot; future adds j/k traversal of the left pane. |
 | **Guidance overlay** | Textarea overlay triggered by `g`. Submit with `ctrl+s`, cancel with `esc`. |
 
 ### Key Bindings
 
 | Key | Dashboard | Detail |
 |-----|-----------|--------|
-| `j` / `k` | Move cursor up/down | — |
+| `j` / `k` | Move cursor up/down | Navigate snapshot list (future) |
 | `enter` | Inspect selected stream | — |
 | `n` | New stream | — |
 | `s` | Start/resume selected stream | — |
 | `x` | Stop selected stream | — |
 | `g` | Open guidance input | Open guidance input |
-| `left` / `right` | — | Navigate snapshots |
+| `d` | — | Show full diff for selected snapshot (future) |
 | `esc` | Quit | Back to dashboard |
 | `q` | Quit | Back to dashboard |
 
