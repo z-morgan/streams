@@ -118,6 +118,9 @@ type Stream struct {
     Iteration     int         // iteration count within current macro-phase
     Converged     bool
     BeadsParentID string
+    BaseSHA       string      // commit the stream branched from; rebase target
+    Branch        string      // e.g. "streams/<stream-id>"
+    WorkTree      string      // absolute path to git worktree
     Snapshots     []Snapshot  // append-only
     Guidance      []Guidance  // queued by TUI, drained by loop
     CreatedAt     time.Time
@@ -129,6 +132,29 @@ type Stream struct {
 - `Pipeline` + `PipelineIndex` track the macro-phase. `IterStep` tracks position within an iteration. `Iteration` resets to 0 on each macro-phase transition.
 - Snapshots are append-only; each iteration produces exactly one.
 - Guidance is a FIFO queue: the TUI pushes, the loop drains at the guidance step.
+
+### Git Branch & Working Directory
+
+Each stream gets its own git branch and worktree for isolation:
+
+**On stream creation:**
+1. Record `BaseSHA = HEAD` — this is the rebase target for autosquash.
+2. Create a worktree: `git worktree add .streams/worktrees/<stream-id> -b streams/<stream-id>`
+3. The CLI runtime's `WorkDir` points to the worktree path.
+
+**During the coding phase:**
+- All commits land on the stream's branch inside its worktree.
+- Autosquash rebases onto BaseSHA: `git rebase --autosquash <BaseSHA>` (run inside the worktree).
+- The user's main working directory is untouched.
+
+**On stream completion/cleanup:**
+- `git worktree remove .streams/worktrees/<stream-id>`
+- Branch can be merged, rebased onto main, or deleted — user's choice.
+
+**Why worktrees over in-place:**
+- User can keep using the repo while a stream runs.
+- Multiple streams get natural isolation (each has its own worktree + branch).
+- `git worktree add` is a single command — minimal implementation cost.
 
 ### Snapshot
 
