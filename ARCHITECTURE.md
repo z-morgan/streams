@@ -262,9 +262,9 @@ Pairing mode forces `TransitionMode` to always return `pause` regardless of what
 
 **Plan** — The implement agent drafts/revises a plan file (`plan.md` in the working directory). The review agent reads the plan and files beads for suggested changes. The implement agent addresses those beads, updates the plan, and closes them. Converges when open children count doesn't increase after a review step. No commits — the plan file is working state. Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
 
-**Decompose** — The implement agent reads the converged plan and creates ordered child beads — one per logical step in the coding phase. The review agent checks scoping, ordering, and gaps. Converges when open children count doesn't increase after a review step. Output: a set of ordered, actionable beads that become the coding phase's work queue. Tool restrictions: both get `Bash,Read,Glob,Grep` (decompose doesn't write code).
+**Decompose** — The implement agent reads the converged plan and creates child beads — one per logical step in the coding phase — with execution order encoded in `metadata.sequence`. The review agent checks scoping, ordering, and gaps. Converges when open children count doesn't increase after a review step. Output: a set of sequenced, actionable beads that become the coding phase's work queue. Tool restrictions: both get `Bash,Read,Glob,Grep` (decompose doesn't write code).
 
-**Coding** — First pass: the implement agent works through step beads in order, committing as each is closed. Subsequent passes: the review agent files new beads (referencing the relevant commit in the description), the implement agent addresses them with `git commit --fixup=<sha>`. Before each review step, `git rebase --autosquash` collapses fixup commits so the reviewer always sees clean history. Converges when open children count doesn't increase after a review step (i.e., review files zero new beads against clean history). Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
+**Coding** — First pass: the Go loop sorts step beads by `metadata.sequence` and injects the ordered list into the implement prompt; the agent works through them in order, committing as each is closed. Subsequent passes: the review agent files new beads (referencing the relevant commit in the description), the implement agent addresses them with `git commit --fixup=<sha>`. Before each review step, `git rebase --autosquash` collapses fixup commits so the reviewer always sees clean history. Converges when open children count doesn't increase after a review step (i.e., review files zero new beads against clean history). Tool restrictions: implement gets `Bash,Read,Edit,Write,Glob,Grep`; review gets `Bash,Read,Glob,Grep`.
 
 ### Design Decisions
 
@@ -281,6 +281,12 @@ Pairing mode forces `TransitionMode` to always return `pause` regardless of what
 - The user can inspect progress at any time via `bd show <parent> --children`.
 
 Both agents interact with beads directly — the Go orchestrator creates the parent issue and passes the ID, but the agents navigate beads themselves.
+
+**Step ordering via metadata.** Beads has no native ordering field. Step execution order is encoded in each issue's metadata as `{"sequence": N}`. The decompose implement agent assigns sequential integers starting at 1. The Go loop — not the agent — fetches children, sorts by `metadata.sequence`, and injects the ordered list into the coding implement prompt. This design:
+- Avoids fragile title-prefix parsing ("Step N: ...").
+- Keeps sorting logic in deterministic Go code, not agent behavior.
+- Doesn't conflate ordering with blocking (dependency chains would make steps show as "blocked" in `bd ready`).
+- Survives renumbering during decompose review — the next implement iteration simply updates sequence values.
 
 **Per-step tool restrictions.** Tools are restricted at the CLI level, not just by prompt instruction:
 
@@ -356,13 +362,18 @@ Each macro-phase provides implement and review prompts. The prompts are injected
 
 > You are breaking a plan into implementation steps. Each step will become one commit.
 >
-> Read plan.md and create one beads issue per logical step:
->   bd create --parent {parent_id} --title="Step N: <action>" --type=task --priority=2 --description="<what to do in this step>"
+> Read plan.md and create one beads issue per logical step, using the metadata field to encode execution order:
+>   bd create --parent {parent_id} --title="<descriptive action>" --type=task --priority=2 --metadata '{"sequence":N}' --description="<what to do in this step>"
+>
+> Example:
+>   bd create --parent {parent_id} --title="Scaffold Go module and directory layout" --type=task --priority=2 --metadata '{"sequence":1}' --description="..."
+>   bd create --parent {parent_id} --title="Define runtime interface" --type=task --priority=2 --metadata '{"sequence":2}' --description="..."
 >
 > Rules:
 > - Steps should be small and independently meaningful.
-> - Order matters — each step should build on the previous.
+> - Order matters — assign sequential `sequence` values starting at 1.
 > - Each step should be completable in a single commit.
+> - Titles should be descriptive actions, not numbered prefixes.
 > - Do not write code. Do not commit.
 
 **Decompose phase — review prompt:**
@@ -373,7 +384,9 @@ Each macro-phase provides implement and review prompts. The prompts are injected
 >
 > Run: bd show {parent_id} --children
 >
-> Evaluate: Are steps well-scoped? Well-ordered? Missing steps? Steps that should be split or merged?
+> Evaluate: Are steps well-scoped? Well-ordered (check metadata.sequence values)? Missing steps? Steps that should be split or merged?
+>
+> If steps need reordering, renumbering, insertion, or removal, file a child issue describing the change. The next implement iteration will update the sequence metadata accordingly.
 >
 > File child issues for any adjustments needed. If the decomposition is ready, respond with exactly: "No further improvements needed."
 
@@ -384,17 +397,31 @@ Each macro-phase provides implement and review prompts. The prompts are injected
 > Task: {task description}
 > Parent issue: {beads parent ID}
 >
-> Steps:
-> 1. Run: bd show {parent_id} --children
-> 2. For each open child issue, determine the commit strategy from its content:
->    - **Step issue** (title like "Step N: ..."): Implement the change, run tests, commit with a descriptive message.
->    - **Review feedback** (description references a commit SHA): Make the fix and create a fixup commit targeting the original: git commit --fixup=<sha>
-> 3. Close each child issue with bd close after addressing it.
+> Work through these steps in order:
+> {ordered_steps}
+>
+> For each step:
+> 1. Implement the change described in the issue.
+> 2. Run tests.
+> 3. Commit with a descriptive message.
+> 4. Close the issue: bd close {step_id}
+>
+> If there are also open review feedback issues (description references a commit SHA), address those with fixup commits: git commit --fixup=<sha>
 >
 > Rules:
-> - One commit per child issue.
+> - One commit per issue.
 > - Run tests before committing.
 > - Do not create new beads issues.
+
+The `{ordered_steps}` placeholder is populated by the Go loop. Before invoking the implement agent, the loop fetches children via `bd show {parent_id} --children --json`, parses each child's `metadata.sequence` field, sorts numerically, and renders an ordered list:
+
+```
+1. streams-abc — Scaffold Go module and directory layout
+2. streams-def — Define runtime interface
+3. streams-ghi — Implement Claude CLI wrapper
+```
+
+This keeps ordering logic in Go (deterministic) rather than relying on the agent to sort.
 
 **Coding phase — review prompt:**
 
