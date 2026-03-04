@@ -174,6 +174,7 @@ type Snapshot struct {
     CommitSHAs  []string     // commits made this iteration (coding phase only)
     BeadsClosed []string     // bead IDs closed by implement step
     BeadsOpened []string     // bead IDs opened by review step
+    GuidanceConsumed []Guidance  // guidance items injected into this iteration's implement step
     Error       *LoopError  // non-nil if iteration ended in error (partial snapshot)
     Timestamp   time.Time
 }
@@ -219,7 +220,7 @@ Implement → Autosquash (coding phase only) → Review → Converge? → Checkp
 - **Review step** — the Go loop counts open children before invoking the review agent, then counts again after. The agent critiques the implement step's output and files beads for improvements. The delta populates `IterationResult`.
 - **Convergence check** — the loop calls `MacroPhase.IsConverged(result)`. Default implementation: `result.OpenChildrenAfter <= result.OpenChildrenBefore` (review didn't add work).
 - **Checkpoint step** — produce a snapshot, persist state.
-- **Guidance step** — drain any queued human guidance, incorporate into next iteration.
+- **Guidance step** — drain any queued human guidance, incorporate into next iteration. See [Guidance Injection](#guidance-injection) for details.
 
 ### Macro-Phase Interface
 
@@ -511,6 +512,85 @@ Why restart the whole iteration instead of the failed step:
 
 - **Detail view:** When `stream.LastError != nil`, render an error block above the snapshot list showing Kind, Step, Message, and (expandable) Detail.
 - **Dashboard:** Paused-with-error streams show a distinct indicator (e.g., `!` or red status) vs. paused-by-user streams.
+
+### Guidance Injection
+
+Guidance is the mechanism for a human to steer an autonomous stream without stopping it. The user types free-text direction via the TUI's guidance overlay (`g` key), and the loop incorporates it into the next iteration.
+
+#### Design Principles
+
+- **Implement-only.** Guidance injects into the implement step's prompt. The review step's role is fixed: evaluate and file issues. Steering the reviewer would muddy the separation between "do work" and "critique work."
+- **Additive, not override.** Guidance adds context to the existing prompt — it does not replace the system prompt or phase-level rules. The `--append-system-prompt` flag carries invariant phase instructions; guidance is ephemeral, iteration-specific direction.
+- **Content direction, not meta-control.** Guidance does not force phase transitions, skip phases, or change the pipeline. Those are separate TUI actions (future: a key binding to force-advance the pipeline index). Guidance is about *what* the agent should focus on, not *how* the loop should behave.
+- **Loop concern, not phase concern.** The loop handles injection generically. Phases provide the base prompt; the loop appends guidance. The `MacroPhase` interface does not change.
+
+#### Data Flow
+
+1. **User submits guidance.** TUI pushes `Guidance{Text, Timestamp}` into `stream.Guidance` (thread-safe via mutex). Multiple items can queue up between iterations.
+2. **Loop drains at StepGuidance.** At the end of each iteration, the loop acquires the lock, moves all items from `stream.Guidance` into a local `pendingGuidance []Guidance` variable, and clears the queue.
+3. **Next iteration injects.** At StepImplement, if `pendingGuidance` is non-empty, the loop appends a guidance section to the implement prompt before passing it to `Runtime.Run()`.
+4. **Snapshot records.** The consumed guidance items are stored in `snapshot.GuidanceConsumed` for history. After the implement step runs, `pendingGuidance` is cleared.
+
+```go
+// Inside the loop goroutine (simplified)
+var pendingGuidance []Guidance
+
+for {
+    // StepImplement
+    prompt := phase.ImplementPrompt(ctx)
+    if len(pendingGuidance) > 0 {
+        prompt = appendGuidanceSection(prompt, pendingGuidance)
+    }
+    resp, err := runtime.Run(ctx, Request{Prompt: prompt, ...})
+
+    // ... autosquash, review, convergence, checkpoint ...
+
+    // Record consumed guidance in snapshot
+    snapshot.GuidanceConsumed = pendingGuidance
+
+    // StepGuidance — drain queue for next iteration
+    stream.mu.Lock()
+    pendingGuidance = stream.Guidance
+    stream.Guidance = nil
+    stream.mu.Unlock()
+}
+```
+
+#### Prompt Format
+
+When guidance is present, the loop appends this section to the implement prompt:
+
+```
+---
+
+## Human Guidance
+
+The user has provided the following guidance for this iteration:
+
+1. [guidance text] (received [timestamp])
+2. [guidance text] (received [timestamp])
+
+Prioritize addressing this guidance alongside your normal work items.
+```
+
+Multiple items are numbered in chronological order. The section is appended (not prepended) so the agent sees the phase's core instructions first.
+
+#### Timing
+
+Guidance submitted while the implement step is running sits in the queue until `StepGuidance` at the end of the iteration. The loop does not cancel a running step to inject mid-flight. This is intentional for v1:
+
+- Canceling and restarting wastes the work already done.
+- The agent will pick up the guidance on the next iteration, typically within minutes.
+- The TUI shows queued guidance count so the user knows their input is pending.
+
+#### What Guidance Is Not
+
+| Not This | Use This Instead |
+|----------|------------------|
+| Force phase transition | Future: TUI key binding to advance pipeline index |
+| Stop the stream | Press `x` to stop |
+| Override phase rules | Edit the phase's system prompt |
+| Direct the reviewer | File beads issues manually, or adjust the review prompt |
 
 ---
 
