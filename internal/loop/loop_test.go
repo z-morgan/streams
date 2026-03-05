@@ -112,7 +112,7 @@ func TestRunConvergesOnFirstIteration(t *testing.T) {
 	// Per iteration: idsBefore, idsAfterImpl, idsAfterReview
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -140,7 +140,7 @@ func TestRunSnapshotPopulatesFields(t *testing.T) {
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), ids("b-2"), ids("b-2", "b-3")}}
 
 	// maxIterations=1 so it pauses after one iteration regardless of convergence.
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 1, mockFactory)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 1, mockFactory, nil)
 
 	if len(s.Snapshots) != 1 {
 		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
@@ -177,7 +177,7 @@ func TestRunMultipleIterations(t *testing.T) {
 		ids("b-3", "b-4", "b-5"), nil, nil,
 	}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -198,7 +198,7 @@ func TestRunContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancelled
 
-	Run(ctx, s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory)
+	Run(ctx, s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
 
 	if s.GetStatus() != stream.StatusStopped {
 		t.Errorf("expected StatusStopped, got %s", s.GetStatus())
@@ -222,7 +222,7 @@ func TestRunAutoAdvancesToNextPhase(t *testing.T) {
 		ids("b-3"), nil, nil,
 	}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -250,7 +250,7 @@ func TestRunAutoAdvancePausesWhenPipelineExhausted(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -275,7 +275,7 @@ func TestRunPauseTransitionDoesNotAdvance(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
 
 	if s.PipelineIndex != 0 {
 		t.Errorf("expected PipelineIndex=0 (pause should not advance), got %d", s.PipelineIndex)
@@ -294,7 +294,7 @@ func TestRunRuntimeError(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2")}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
