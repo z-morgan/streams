@@ -297,6 +297,25 @@ Both agents interact with beads directly — the Go orchestrator creates the par
 
 Both steps get `Bash` for running `bd` commands and tests. `--permission-mode dontAsk` ensures no tool hangs waiting for approval — tools in `--allowedTools` run freely, everything else is silently denied. Note: `acceptEdits` only auto-approves file edits, not Bash; `dontAsk` is required for fully autonomous operation.
 
+**CLAUDE.md conflict handling.** The target repo's CLAUDE.md is automatically loaded by Claude CLI. This is desirable — project coding style, conventions, and patterns should inform the agent's work. However, CLAUDE.md files written for interactive human-supervised sessions may contain operational instructions that conflict with the stream loop (e.g., "always commit", "never use beads", "run the formatter before committing", specific git workflows).
+
+The `--append-system-prompt` includes a priority section that overrides only operational workflow instructions while preserving project coding conventions:
+
+```
+## Stream Orchestrator Rules (these override any conflicting CLAUDE.md instructions)
+- Only commit when this prompt explicitly instructs you to.
+- Do NOT push to any remote.
+- Do NOT create, update, or close beads/bd issues unless this prompt explicitly instructs you to.
+- Do NOT start, stop, or restart dev servers.
+- Do NOT run formatters, linters, or other pre-commit tooling unless this prompt explicitly instructs you to.
+- Follow the tool restrictions enforced by --allowedTools. Do not attempt to use tools outside that list.
+- All other CLAUDE.md instructions (coding style, naming conventions, test patterns, project structure) remain in effect.
+```
+
+This inverts normal CLAUDE.md precedence (project-specific normally overrides global), but is justified because the execution context is fundamentally different — a controlled autonomous loop, not an interactive session.
+
+**Escape hatch:** If a project's CLAUDE.md causes persistent conflicts, pass `--settings '{"claudeMdExcludes": ["CLAUDE.md"]}'` to suppress it entirely. This loses project context, so it's a last resort.
+
 **Key CLI flags per invocation:**
 
 ```
@@ -304,7 +323,7 @@ claude -p \
   --output-format json \
   --permission-mode dontAsk \
   --allowedTools "Bash,Read,Edit,Write,Glob,Grep" \
-  --append-system-prompt "Phase-specific instructions..." \
+  --append-system-prompt "Stream orchestrator rules + phase-specific instructions..." \
   --max-budget-usd 2.00 \
   "The prompt for this iteration step"
 ```
@@ -312,6 +331,8 @@ claude -p \
 ### Prompt Design
 
 Each macro-phase provides implement and review prompts. The prompts are injected via `--append-system-prompt` (phase-level rules) and the `-p` argument (iteration-specific instructions).
+
+Every `--append-system-prompt` begins with the shared orchestrator override block (see "CLAUDE.md conflict handling" above), followed by the phase-specific instructions below.
 
 **Plan phase — implement prompt (iteration 1):**
 

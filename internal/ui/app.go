@@ -1,12 +1,17 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/stream"
 )
+
+type clearStatusMsg struct{}
 
 // view tracks which view is active.
 type view int
@@ -36,6 +41,9 @@ type Model struct {
 	showNewStream  bool
 	newStreamInput textinput.Model
 	creating       bool // true while orch.Create is running
+
+	// Ephemeral status message shown at bottom of dashboard.
+	statusMsg string
 }
 
 // streamCreatedMsg is sent when orch.Create finishes.
@@ -103,7 +111,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamCreatedMsg:
 		m.creating = false
-		// Error is silently dropped for now — the stream just won't appear.
+		if msg.err != nil {
+			m.statusMsg = "Error creating stream: " + msg.err.Error()
+			return m, clearStatusAfter(3 * time.Second)
+		}
+		return m, nil
+
+	case clearStatusMsg:
+		m.statusMsg = ""
 		return m, nil
 
 	case orchestrator.Event:
@@ -138,6 +153,8 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.detail.snapCursor < 0 {
 				m.detail.snapCursor = 0
 			}
+		} else {
+			return m.setStatus("No stream selected. Press n to create one.")
 		}
 
 	case "n":
@@ -149,11 +166,15 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		if st := m.selectedStream(); st != nil {
 			m.orch.Start(st.ID)
+		} else {
+			return m.setStatus("No stream selected. Press n to create one.")
 		}
 
 	case "x":
 		if st := m.selectedStream(); st != nil {
 			m.orch.Stop(st.ID)
+		} else {
+			return m.setStatus("No stream selected.")
 		}
 
 	case "g":
@@ -164,6 +185,8 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.guidanceInput.Focus()
 			return m, textarea.Blink
 		}
+		return m.setStatus("No stream selected.")
+
 	}
 
 	return m, nil
@@ -266,35 +289,39 @@ func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	var content string
+	if m.showNewStream {
+		return renderNewStreamOverlay(m.newStreamInput, m.width, m.height)
+	}
+
+	if m.showGuidance {
+		return renderGuidanceOverlay(m.guidanceInput, m.width, m.height)
+	}
 
 	switch m.view {
 	case viewDashboard:
 		streams := m.orch.List()
 		m.dashboard.clampCursor(len(streams))
-		content = renderDashboard(streams, m.dashboard.cursor, m.width, m.height)
+		content := renderDashboard(streams, m.dashboard.cursor, m.width, m.height)
+		if m.creating {
+			content += "\n\n" + helpStyle.Render("Creating stream...")
+		}
+		if m.statusMsg != "" {
+			content += "\n\n" + helpStyle.Render(m.statusMsg)
+		}
+		return content
 
 	case viewDetail:
 		st := m.orch.Get(m.selectedID)
-		content = renderDetail(st, m.detail.snapCursor, m.width, m.height)
-	}
+		return renderDetail(st, m.detail.snapCursor, m.width, m.height)
 
-	if m.showNewStream {
-		content += "\n\n" + renderNewStreamOverlay(m.newStreamInput, m.width)
-	} else if m.creating {
-		content += "\n\n" + helpStyle.Render("Creating stream...")
+	default:
+		return ""
 	}
-
-	if m.showGuidance {
-		content += "\n\n" + renderGuidanceOverlay(m.guidanceInput, m.width)
-	}
-
-	return content
 }
 
-func renderNewStreamOverlay(ti textinput.Model, width int) string {
-	overlay := labelStyle.Render("New Stream") + "\n"
-	overlay += ti.View() + "\n"
+func renderNewStreamOverlay(ti textinput.Model, width, height int) string {
+	overlay := titleStyle.Render("New Stream") + "\n\n"
+	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("enter: create  esc: cancel")
 
 	maxWidth := width - 6
@@ -302,12 +329,14 @@ func renderNewStreamOverlay(ti textinput.Model, width int) string {
 		maxWidth = 40
 	}
 
-	return overlayStyle.Width(maxWidth).Render(overlay)
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func renderGuidanceOverlay(ti textarea.Model, width int) string {
-	overlay := labelStyle.Render("Guidance") + "\n"
-	overlay += ti.View() + "\n"
+func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
+	overlay := titleStyle.Render("Guidance") + "\n\n"
+	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("ctrl+s: send  esc: cancel")
 
 	maxWidth := width - 6
@@ -315,7 +344,20 @@ func renderGuidanceOverlay(ti textarea.Model, width int) string {
 		maxWidth = 40
 	}
 
-	return overlayStyle.Width(maxWidth).Render(overlay)
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func clearStatusAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
+}
+
+func (m Model) setStatus(msg string) (Model, tea.Cmd) {
+	m.statusMsg = msg
+	return m, clearStatusAfter(2 * time.Second)
 }
 
 // selectedStream returns the stream at the dashboard cursor, or nil.
