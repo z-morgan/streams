@@ -2,6 +2,7 @@ package ui
 
 import (
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/stream"
@@ -30,6 +31,17 @@ type Model struct {
 	// Guidance overlay state.
 	showGuidance  bool
 	guidanceInput textarea.Model
+
+	// New stream overlay state.
+	showNewStream  bool
+	newStreamInput textinput.Model
+	creating       bool // true while orch.Create is running
+}
+
+// streamCreatedMsg is sent when orch.Create finishes.
+type streamCreatedMsg struct {
+	stream *stream.Stream
+	err    error
 }
 
 // New creates a new TUI model.
@@ -38,10 +50,16 @@ func New(orch *orchestrator.Orchestrator) Model {
 	ti.Placeholder = "Enter guidance for this stream..."
 	ti.CharLimit = 1000
 
+	ni := textinput.New()
+	ni.Placeholder = "Describe the task..."
+	ni.CharLimit = 200
+	ni.Width = 60
+
 	return Model{
-		orch:          orch,
-		view:          viewDashboard,
-		guidanceInput: ti,
+		orch:           orch,
+		view:           viewDashboard,
+		guidanceInput:  ti,
+		newStreamInput: ni,
 	}
 }
 
@@ -59,6 +77,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle new stream overlay input first if active.
+	if m.showNewStream {
+		return m.updateNewStream(msg)
+	}
+
 	// Handle guidance overlay input first if active.
 	if m.showGuidance {
 		return m.updateGuidance(msg)
@@ -77,6 +100,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewDetail:
 			return m.updateDetail(msg)
 		}
+
+	case streamCreatedMsg:
+		m.creating = false
+		// Error is silently dropped for now — the stream just won't appear.
+		return m, nil
 
 	case orchestrator.Event:
 		// Orchestrator events trigger a re-render (state is in the stream objects).
@@ -113,9 +141,10 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "n":
-		// New stream creation — will be wired to a text input later.
-		// For now this is a placeholder.
-		return m, nil
+		m.showNewStream = true
+		m.newStreamInput.Reset()
+		m.newStreamInput.Focus()
+		return m, textinput.Blink
 
 	case "s":
 		if st := m.selectedStream(); st != nil {
@@ -185,6 +214,34 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.showNewStream = false
+			return m, nil
+
+		case "enter":
+			task := m.newStreamInput.Value()
+			if task == "" {
+				return m, nil
+			}
+			m.showNewStream = false
+			m.creating = true
+			orch := m.orch
+			return m, func() tea.Msg {
+				st, err := orch.Create(task)
+				return streamCreatedMsg{stream: st, err: err}
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.newStreamInput, cmd = m.newStreamInput.Update(msg)
+	return m, cmd
+}
+
 func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -222,11 +279,30 @@ func (m Model) View() string {
 		content = renderDetail(st, m.detail.snapCursor, m.width, m.height)
 	}
 
+	if m.showNewStream {
+		content += "\n\n" + renderNewStreamOverlay(m.newStreamInput, m.width)
+	} else if m.creating {
+		content += "\n\n" + helpStyle.Render("Creating stream...")
+	}
+
 	if m.showGuidance {
 		content += "\n\n" + renderGuidanceOverlay(m.guidanceInput, m.width)
 	}
 
 	return content
+}
+
+func renderNewStreamOverlay(ti textinput.Model, width int) string {
+	overlay := labelStyle.Render("New Stream") + "\n"
+	overlay += ti.View() + "\n"
+	overlay += helpStyle.Render("enter: create  esc: cancel")
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	return overlayStyle.Width(maxWidth).Render(overlay)
 }
 
 func renderGuidanceOverlay(ti textarea.Model, width int) string {
