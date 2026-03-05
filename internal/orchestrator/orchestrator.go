@@ -43,7 +43,8 @@ const (
 type Config struct {
 	MaxIterations int
 	MaxBudgetUSD  string
-	RepoDir       string // the main repository directory
+	RepoDir       string   // the main repository directory
+	Pipeline      []string // ordered macro-phase names; defaults to ["coding"]
 }
 
 // Orchestrator manages the lifecycle of multiple streams.
@@ -112,13 +113,18 @@ func (o *Orchestrator) Create(task string) (*stream.Stream, error) {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
+	pipeline := o.config.Pipeline
+	if len(pipeline) == 0 {
+		pipeline = []string{"coding"}
+	}
+
 	st := &stream.Stream{
 		ID:            streamID,
 		Name:          task,
 		Task:          task,
 		Mode:          stream.ModeAutonomous,
 		Status:        stream.StatusCreated,
-		Pipeline:      []string{"coding"},
+		Pipeline:      pipeline,
 		PipelineIndex: 0,
 		BeadsParentID: parentID,
 		BaseSHA:       baseSHA,
@@ -178,9 +184,9 @@ func (o *Orchestrator) Start(id string) error {
 	// Clear any previous error on resume.
 	st.SetLastError(nil)
 
-	rt := &budgetRuntime{
-		inner:     &claude.Runtime{WorkDir: st.WorkTree},
-		maxBudget: o.config.MaxBudgetUSD,
+	rt := &runtime.BudgetRuntime{
+		Inner:     &claude.Runtime{WorkDir: st.WorkTree},
+		MaxBudget: o.config.MaxBudgetUSD,
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
 	git := &loop.CLIGitQuerier{}
@@ -193,7 +199,10 @@ func (o *Orchestrator) Start(id string) error {
 	o.emit(Event{StreamID: id, Kind: EventStarted})
 
 	go func() {
-		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, loop.NewPhase)
+		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, loop.NewPhase, func(s *stream.Stream) {
+			o.checkpoint(s)
+			o.emit(Event{StreamID: s.ID, Kind: EventCheckpoint})
+		})
 
 		// Persist final state.
 		o.checkpoint(st)
@@ -236,7 +245,7 @@ func (o *Orchestrator) SendGuidance(id string, text string) error {
 		Text:      text,
 		Timestamp: time.Now(),
 	}
-	st.Guidance = append(st.Guidance, g)
+	st.AddGuidance(g)
 	return nil
 }
 
@@ -272,20 +281,6 @@ func (o *Orchestrator) emit(e Event) {
 	if sink != nil {
 		sink.Send(e)
 	}
-}
-
-// budgetRuntime wraps a runtime to inject max-budget-usd into every request.
-type budgetRuntime struct {
-	inner     *claude.Runtime
-	maxBudget string
-}
-
-func (b *budgetRuntime) Run(ctx context.Context, req runtime.Request) (*runtime.Response, error) {
-	if req.Options == nil {
-		req.Options = make(map[string]string)
-	}
-	req.Options["maxBudgetUsd"] = b.maxBudget
-	return b.inner.Run(ctx, req)
 }
 
 func createBeadsParent(task, workDir string) (string, error) {

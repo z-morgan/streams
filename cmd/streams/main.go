@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zmorgan/streams/internal/loop"
@@ -30,6 +31,7 @@ func run() int {
 	maxIterations := flag.Int("max-iterations", 10, "maximum iteration count")
 	maxBudget := flag.String("max-budget-per-step", "2.00", "max USD budget per CLI invocation")
 	dataDir := flag.String("data-dir", "", "directory for stream data (default: <dir>/.streams)")
+	pipeline := flag.String("pipeline", "coding", "comma-separated pipeline phases (e.g. plan,decompose,coding)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -46,11 +48,20 @@ func run() int {
 		storeRoot = filepath.Join(workDir, ".streams")
 	}
 
+	var pipelinePhases []string
+	for _, p := range strings.Split(*pipeline, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			pipelinePhases = append(pipelinePhases, p)
+		}
+	}
+
 	s := &store.Store{Root: storeRoot}
 	orch := orchestrator.New(s, orchestrator.Config{
 		MaxIterations: *maxIterations,
 		MaxBudgetUSD:  *maxBudget,
 		RepoDir:       workDir,
+		Pipeline:      pipelinePhases,
 	})
 
 	if err := orch.LoadExisting(); err != nil {
@@ -100,15 +111,20 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 		cancel()
 	}()
 
-	rt := &budgetRuntime{
-		inner:     &claude.Runtime{WorkDir: st.WorkTree},
-		maxBudget: maxBudget,
+	rt := &runtime.BudgetRuntime{
+		Inner:     &claude.Runtime{WorkDir: st.WorkTree},
+		MaxBudget: maxBudget,
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
 	git := &loop.CLIGitQuerier{}
-	phase := &loop.CodingPhase{}
+	phaseName := st.Pipeline[st.PipelineIndex]
+	phase, phaseErr := loop.NewPhase(phaseName)
+	if phaseErr != nil {
+		slog.Error("failed to create phase", "phase", phaseName, "err", phaseErr)
+		return 1
+	}
 
-	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase)
+	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase, nil)
 
 	switch {
 	case st.GetStatus() == stream.StatusStopped:
@@ -144,16 +160,3 @@ func resolveDir(dir string) (string, error) {
 	return abs, nil
 }
 
-// budgetRuntime wraps a runtime to inject max-budget-usd into every request.
-type budgetRuntime struct {
-	inner     *claude.Runtime
-	maxBudget string
-}
-
-func (b *budgetRuntime) Run(ctx context.Context, req runtime.Request) (*runtime.Response, error) {
-	if req.Options == nil {
-		req.Options = make(map[string]string)
-	}
-	req.Options["maxBudgetUsd"] = b.maxBudget
-	return b.inner.Run(ctx, req)
-}
