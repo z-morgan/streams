@@ -61,6 +61,8 @@ type MacroPhase interface {
 // NewPhase returns a MacroPhase for the given pipeline phase name.
 func NewPhase(name string) (MacroPhase, error) {
 	switch name {
+	case "plan":
+		return &PlanPhase{}, nil
 	case "coding":
 		return &CodingPhase{}, nil
 	default:
