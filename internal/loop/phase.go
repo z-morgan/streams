@@ -63,6 +63,8 @@ func NewPhase(name string) (MacroPhase, error) {
 	switch name {
 	case "plan":
 		return &PlanPhase{}, nil
+	case "decompose":
+		return &DecomposePhase{}, nil
 	case "coding":
 		return &CodingPhase{}, nil
 	default:
