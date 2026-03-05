@@ -156,3 +156,13 @@ func (s *Stream) AppendSnapshot(snap Snapshot) {
 	s.UpdatedAt = time.Now()
 	s.mu.Unlock()
 }
+
+// DrainGuidance atomically moves all queued guidance items out of the stream
+// and returns them. The stream's guidance queue is emptied.
+func (s *Stream) DrainGuidance() []Guidance {
+	s.mu.Lock()
+	g := s.Guidance
+	s.Guidance = nil
+	s.mu.Unlock()
+	return g
+}
