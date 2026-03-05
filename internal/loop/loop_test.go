@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/zmorgan/streams/internal/runtime"
@@ -32,13 +33,13 @@ func (m *mockRuntime) Run(_ context.Context, _ runtime.Request) (*runtime.Respon
 // mockBeads returns configurable open ID lists per call and a fixed step list.
 type mockBeads struct {
 	openIDs   [][]string
-	countCalls int
-	steps      []Step
+	listCalls int
+	steps     []Step
 }
 
 func (m *mockBeads) ListOpenChildren(_ string) ([]string, error) {
-	i := m.countCalls
-	m.countCalls++
+	i := m.listCalls
+	m.listCalls++
 	if i < len(m.openIDs) {
 		return m.openIDs[i], nil
 	}
@@ -49,12 +50,23 @@ func (m *mockBeads) FetchOrderedSteps(_ string) ([]Step, error) {
 	return m.steps, nil
 }
 
-// mockGit is a no-op GitQuerier for testing.
-type mockGit struct{}
+// mockGit returns a fixed HEAD SHA that increments per call.
+type mockGit struct {
+	headCalls int
+}
 
-func (m *mockGit) HeadSHA(_ string) (string, error)                         { return "abc123", nil }
-func (m *mockGit) DiffStat(_, _ string) (string, error)                     { return "", nil }
-func (m *mockGit) CommitsBetween(_, _, _ string) ([]string, error)           { return nil, nil }
+func (m *mockGit) HeadSHA(_ string) (string, error) {
+	m.headCalls++
+	return fmt.Sprintf("sha%d", m.headCalls), nil
+}
+
+func (m *mockGit) DiffStat(_, _ string) (string, error) {
+	return " 2 files changed, 10 insertions(+)", nil
+}
+
+func (m *mockGit) CommitsBetween(_, _, toSHA string) ([]string, error) {
+	return []string{toSHA}, nil
+}
 
 // mockPhase is a minimal MacroPhase for testing.
 type mockPhase struct{}
@@ -68,7 +80,7 @@ func (p *mockPhase) IsConverged(r IterationResult) bool {
 	return r.OpenChildrenAfter <= r.OpenChildrenBefore
 }
 func (p *mockPhase) BeforeReview(_ PhaseContext) error { return nil }
-func (p *mockPhase) TransitionMode() Transition { return TransitionPause }
+func (p *mockPhase) TransitionMode() Transition        { return TransitionPause }
 
 // mockAutoAdvancePhase returns TransitionAutoAdvance to test pipeline advancement.
 type mockAutoAdvancePhase struct{ mockPhase }
@@ -86,6 +98,9 @@ func mockFactory(_ string) (MacroPhase, error) {
 	return &mockPhase{}, nil
 }
 
+// ids generates a slice of bead IDs.
+func ids(names ...string) []string { return names }
+
 func TestRunConvergesOnFirstIteration(t *testing.T) {
 	s := newTestStream()
 	rt := &mockRuntime{
@@ -94,8 +109,8 @@ func TestRunConvergesOnFirstIteration(t *testing.T) {
 			{resp: &runtime.Response{Text: "no issues"}},
 		},
 	}
-	// Per iteration: openBefore, openAfterImpl, openAfterReview
-	beads := &mockBeads{openIDs: [][]string{{"a", "b"}, {}, {}}}
+	// Per iteration: idsBefore, idsAfterImpl, idsAfterReview
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
 	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
 
@@ -113,6 +128,38 @@ func TestRunConvergesOnFirstIteration(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotPopulatesFields(t *testing.T) {
+	s := newTestStream()
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "implemented"}},
+			{resp: &runtime.Response{Text: "filed b-3"}},
+		},
+	}
+	// idsBefore: b-1, b-2; idsAfterImpl: b-2 (b-1 closed); idsAfterReview: b-2, b-3 (b-3 opened)
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), ids("b-2"), ids("b-2", "b-3")}}
+
+	// maxIterations=1 so it pauses after one iteration regardless of convergence.
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 1, mockFactory)
+
+	if len(s.Snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	}
+	snap := s.Snapshots[0]
+	if snap.DiffStat == "" {
+		t.Error("expected DiffStat to be populated")
+	}
+	if len(snap.CommitSHAs) == 0 {
+		t.Error("expected CommitSHAs to be populated")
+	}
+	if len(snap.BeadsClosed) != 1 || snap.BeadsClosed[0] != "b-1" {
+		t.Errorf("expected BeadsClosed=[b-1], got %v", snap.BeadsClosed)
+	}
+	if len(snap.BeadsOpened) != 1 || snap.BeadsOpened[0] != "b-3" {
+		t.Errorf("expected BeadsOpened=[b-3], got %v", snap.BeadsOpened)
+	}
+}
+
 func TestRunMultipleIterations(t *testing.T) {
 	s := newTestStream()
 	rt := &mockRuntime{
@@ -123,9 +170,12 @@ func TestRunMultipleIterations(t *testing.T) {
 			{resp: &runtime.Response{Text: "review2"}},
 		},
 	}
-	// Iteration 0: openBefore=3, openAfterImpl=1, openAfterReview=3 → not converged (3 > 1)
-	// Iteration 1: openBefore=3, openAfterImpl=0, openAfterReview=0 → converged (0 <= 0)
-	beads := &mockBeads{openIDs: [][]string{{"a", "b", "c"}, {"a"}, {"a", "b", "c"}, {"a", "b", "c"}, {}, {}}}
+	// Iteration 0: idsBefore=[b-1,b-2,b-3], idsAfterImpl=[b-3], idsAfterReview=[b-3,b-4,b-5] → not converged (3 > 1)
+	// Iteration 1: idsBefore=[b-3,b-4,b-5], idsAfterImpl=[], idsAfterReview=[] → converged (0 <= 0)
+	beads := &mockBeads{openIDs: [][]string{
+		ids("b-1", "b-2", "b-3"), ids("b-3"), ids("b-3", "b-4", "b-5"),
+		ids("b-3", "b-4", "b-5"), nil, nil,
+	}}
 
 	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
 
@@ -161,17 +211,16 @@ func TestRunAutoAdvancesToNextPhase(t *testing.T) {
 	s.PipelineIndex = 0
 	rt := &mockRuntime{
 		results: []mockResult{
-			// Phase "test" iteration 0: implement + review
 			{resp: &runtime.Response{Text: "impl1"}},
 			{resp: &runtime.Response{Text: "review1"}},
-			// Phase "coding" iteration 0: implement + review
 			{resp: &runtime.Response{Text: "impl2"}},
 			{resp: &runtime.Response{Text: "review2"}},
 		},
 	}
-	// Phase "test": openBefore=2, openAfterImpl=0, openAfterReview=0 → converged
-	// Phase "coding": openBefore=1, openAfterImpl=0, openAfterReview=0 → converged
-	beads := &mockBeads{openIDs: [][]string{{"a", "b"}, {}, {}, {"c"}, {}, {}}}
+	beads := &mockBeads{openIDs: [][]string{
+		ids("b-1", "b-2"), nil, nil,
+		ids("b-3"), nil, nil,
+	}}
 
 	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory)
 
@@ -199,7 +248,7 @@ func TestRunAutoAdvancePausesWhenPipelineExhausted(t *testing.T) {
 			{resp: &runtime.Response{Text: "review"}},
 		},
 	}
-	beads := &mockBeads{openIDs: [][]string{{"a", "b"}, {}, {}}}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
 	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory)
 
@@ -224,7 +273,7 @@ func TestRunPauseTransitionDoesNotAdvance(t *testing.T) {
 			{resp: &runtime.Response{Text: "review"}},
 		},
 	}
-	beads := &mockBeads{openIDs: [][]string{{"a", "b"}, {}, {}}}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
 	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
 
@@ -243,7 +292,7 @@ func TestRunRuntimeError(t *testing.T) {
 			{err: errors.New("connection refused")},
 		},
 	}
-	beads := &mockBeads{openIDs: [][]string{{"a", "b"}}}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2")}}
 
 	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory)
 
