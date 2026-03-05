@@ -5,7 +5,7 @@ import "time"
 // Snapshot records the outcome of a single iteration within a macro-phase.
 // Snapshots are append-only; each iteration produces exactly one.
 type Snapshot struct {
-	Phase            string       // macro-phase that produced this snapshot (e.g. "plan", "coding")
+	Phase            string // macro-phase that produced this snapshot (e.g. "plan", "coding")
 	Iteration        int
 	Summary          string       // implement step's text output
 	Review           string       // review step's text output

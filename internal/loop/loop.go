@@ -21,9 +21,10 @@ const orchestratorRules = `## Stream Orchestrator Rules (these override any conf
 - All other CLAUDE.md instructions (coding style, naming conventions, test patterns, project structure) remain in effect.`
 
 // Run drives the iteration loop for a single stream. It blocks until the phase
-// converges, an error occurs, or the context is cancelled. Outcome is reflected
-// in stream state (StatusPaused+Converged, StatusPaused+LastError, or StatusStopped).
-func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier) {
+// converges, an error occurs, the context is cancelled, or maxIterations is
+// reached (0 means unlimited). Outcome is reflected in stream state
+// (StatusPaused+Converged, StatusPaused+LastError, or StatusStopped).
+func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, maxIterations int) {
 	s.SetStatus(stream.StatusRunning)
 
 	var pendingGuidance []stream.Guidance
@@ -32,6 +33,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// Check for cancellation at top of loop.
 		if ctx.Err() != nil {
 			s.SetStatus(stream.StatusStopped)
+			return
+		}
+
+		// Check max iterations.
+		if maxIterations > 0 && s.GetIteration() >= maxIterations {
+			s.SetStatus(stream.StatusPaused)
 			return
 		}
 
@@ -161,9 +168,9 @@ func buildRequest(prompt string, tools []string) runtime.Request {
 	return runtime.Request{
 		Prompt: prompt,
 		Options: map[string]string{
-			"allowedTools":      strings.Join(tools, ","),
+			"allowedTools":       strings.Join(tools, ","),
 			"appendSystemPrompt": orchestratorRules,
-			"permissionMode":    "dontAsk",
+			"permissionMode":     "dontAsk",
 		},
 	}
 }

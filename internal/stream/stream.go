@@ -11,7 +11,7 @@ type IterStep int
 
 const (
 	StepImplement  IterStep = iota
-	StepAutosquash // coding phase only
+	StepAutosquash          // coding phase only
 	StepReview
 	StepCheckpoint
 	StepGuidance

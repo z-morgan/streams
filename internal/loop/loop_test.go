@@ -52,7 +52,7 @@ func (m *mockBeads) FetchOrderedSteps(_ string) ([]Step, error) {
 // mockPhase is a minimal MacroPhase for testing.
 type mockPhase struct{}
 
-func (p *mockPhase) Name() string                         { return "test" }
+func (p *mockPhase) Name() string                          { return "test" }
 func (p *mockPhase) ImplementPrompt(_ PhaseContext) string { return "implement" }
 func (p *mockPhase) ReviewPrompt(_ PhaseContext) string    { return "review" }
 func (p *mockPhase) ImplementTools() []string              { return []string{"Bash"} }
@@ -81,7 +81,7 @@ func TestRunConvergesOnFirstIteration(t *testing.T) {
 	// Per iteration: openBefore, openAfterImpl, openAfterReview
 	beads := &mockBeads{openCounts: []int{2, 0, 0}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, 0)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -111,7 +111,7 @@ func TestRunMultipleIterations(t *testing.T) {
 	// Iteration 1: openBefore=3, openAfterImpl=0, openAfterReview=0 → converged (0 <= 0)
 	beads := &mockBeads{openCounts: []int{3, 1, 3, 3, 0, 0}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, 0)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -132,7 +132,7 @@ func TestRunContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancelled
 
-	Run(ctx, s, &mockPhase{}, &mockRuntime{}, &mockBeads{})
+	Run(ctx, s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, 0)
 
 	if s.GetStatus() != stream.StatusStopped {
 		t.Errorf("expected StatusStopped, got %s", s.GetStatus())
@@ -148,7 +148,7 @@ func TestRunRuntimeError(t *testing.T) {
 	}
 	beads := &mockBeads{openCounts: []int{2}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, 0)
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
