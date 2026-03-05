@@ -183,7 +183,11 @@ func (o *Orchestrator) Start(id string) error {
 		maxBudget: o.config.MaxBudgetUSD,
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
-	phase := &loop.CodingPhase{}
+	phaseName := st.Pipeline[st.PipelineIndex]
+	phase, err := loop.NewPhase(phaseName)
+	if err != nil {
+		return fmt.Errorf("create phase %q: %w", phaseName, err)
+	}
 
 	o.emit(Event{StreamID: id, Kind: EventStarted})
 

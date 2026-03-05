@@ -57,3 +57,13 @@ type MacroPhase interface {
 	BeforeReview(ctx PhaseContext) error
 	TransitionMode() Transition
 }
+
+// NewPhase returns a MacroPhase for the given pipeline phase name.
+func NewPhase(name string) (MacroPhase, error) {
+	switch name {
+	case "coding":
+		return &CodingPhase{}, nil
+	default:
+		return nil, fmt.Errorf("unknown pipeline phase: %q", name)
+	}
+}
