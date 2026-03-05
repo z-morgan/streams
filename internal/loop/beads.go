@@ -28,23 +28,16 @@ type CLIBeadsQuerier struct {
 
 // beadsChild represents the JSON structure returned by bd show --children --json.
 type beadsChild struct {
-	ID       string                 `json:"id"`
-	Title    string                 `json:"title"`
-	Status   string                 `json:"status"`
-	Metadata map[string]interface{} `json:"metadata"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Notes  string `json:"notes"`
 }
 
 func (q *CLIBeadsQuerier) CountOpenChildren(parentID string) (int, error) {
-	cmd := exec.Command("bd", "show", parentID, "--children", "--json")
-	cmd.Dir = q.WorkDir
-	out, err := cmd.Output()
+	children, err := q.fetchChildren(parentID)
 	if err != nil {
-		return 0, fmt.Errorf("bd show --children --json: %w", err)
-	}
-
-	var children []beadsChild
-	if err := json.Unmarshal(out, &children); err != nil {
-		return 0, fmt.Errorf("parsing bd output: %w", err)
+		return 0, err
 	}
 
 	count := 0
@@ -57,16 +50,9 @@ func (q *CLIBeadsQuerier) CountOpenChildren(parentID string) (int, error) {
 }
 
 func (q *CLIBeadsQuerier) FetchOrderedSteps(parentID string) ([]Step, error) {
-	cmd := exec.Command("bd", "show", parentID, "--children", "--json")
-	cmd.Dir = q.WorkDir
-	out, err := cmd.Output()
+	children, err := q.fetchChildren(parentID)
 	if err != nil {
-		return nil, fmt.Errorf("bd show --children --json: %w", err)
-	}
-
-	var children []beadsChild
-	if err := json.Unmarshal(out, &children); err != nil {
-		return nil, fmt.Errorf("parsing bd output: %w", err)
+		return nil, err
 	}
 
 	var steps []Step
@@ -74,14 +60,7 @@ func (q *CLIBeadsQuerier) FetchOrderedSteps(parentID string) ([]Step, error) {
 		if c.Status != "open" && c.Status != "in_progress" {
 			continue
 		}
-		seq := 0
-		if c.Metadata != nil {
-			if v, ok := c.Metadata["sequence"]; ok {
-				if f, ok := v.(float64); ok {
-					seq = int(f)
-				}
-			}
-		}
+		seq := parseSequence(c.Notes)
 		steps = append(steps, Step{
 			ID:       c.ID,
 			Title:    c.Title,
@@ -94,6 +73,38 @@ func (q *CLIBeadsQuerier) FetchOrderedSteps(parentID string) ([]Step, error) {
 	})
 
 	return steps, nil
+}
+
+// fetchChildren runs bd show --children --json and parses the map-keyed response.
+func (q *CLIBeadsQuerier) fetchChildren(parentID string) ([]beadsChild, error) {
+	cmd := exec.Command("bd", "show", parentID, "--children", "--json")
+	cmd.Dir = q.WorkDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bd show --children --json: %w", err)
+	}
+
+	var result map[string][]beadsChild
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("parsing bd output: %w", err)
+	}
+
+	return result[parentID], nil
+}
+
+// parseSequence extracts a sequence number from the notes field.
+// Expected format: "sequence:N" (as set during decompose).
+func parseSequence(notes string) int {
+	for _, line := range strings.Split(notes, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "sequence:") {
+			val := strings.TrimSpace(strings.TrimPrefix(line, "sequence:"))
+			n := 0
+			fmt.Sscanf(val, "%d", &n)
+			return n
+		}
+	}
+	return 0
 }
 
 // FormatSteps renders an ordered list of steps for prompt injection.
