@@ -178,6 +178,14 @@ func (s *Stream) GetPipeline() []string {
 	return p
 }
 
+// AddGuidance appends a guidance item to the stream under the mutex.
+func (s *Stream) AddGuidance(g Guidance) {
+	s.mu.Lock()
+	s.Guidance = append(s.Guidance, g)
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
 // DrainGuidance atomically moves all queued guidance items out of the stream
 // and returns them. The stream's guidance queue is emptied.
 func (s *Stream) DrainGuidance() []Guidance {
