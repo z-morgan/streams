@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
-	"time"
+	"path/filepath"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zmorgan/streams/internal/loop"
+	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/runtime/claude"
+	"github.com/zmorgan/streams/internal/store"
 	"github.com/zmorgan/streams/internal/stream"
+	"github.com/zmorgan/streams/internal/ui"
 )
 
 func main() {
@@ -22,81 +24,71 @@ func main() {
 }
 
 func run() int {
-	task := flag.String("task", "", "task description (required)")
+	headless := flag.Bool("headless", false, "run a single stream without TUI")
+	task := flag.String("task", "", "task description (required in headless mode)")
 	dir := flag.String("dir", ".", "working directory")
-	beadsParent := flag.String("beads-parent", "", "beads parent issue ID (creates one if not provided)")
 	maxIterations := flag.Int("max-iterations", 10, "maximum iteration count")
 	maxBudget := flag.String("max-budget-per-step", "2.00", "max USD budget per CLI invocation")
+	dataDir := flag.String("data-dir", "", "directory for stream data (default: <dir>/.streams)")
 	flag.Parse()
-
-	if *task == "" {
-		fmt.Fprintln(os.Stderr, "error: --task is required")
-		flag.Usage()
-		return 1
-	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
-	// Resolve working directory to absolute path.
 	workDir, err := resolveDir(*dir)
 	if err != nil {
 		slog.Error("failed to resolve working directory", "dir", *dir, "err", err)
 		return 1
 	}
 
-	// Create beads parent issue if not provided.
-	parentID := *beadsParent
-	if parentID == "" {
-		id, err := createBeadsParent(*task, workDir)
-		if err != nil {
-			slog.Error("failed to create beads parent issue", "err", err)
-			return 1
-		}
-		parentID = id
-		slog.Info("created beads parent issue", "id", parentID)
+	storeRoot := *dataDir
+	if storeRoot == "" {
+		storeRoot = filepath.Join(workDir, ".streams")
 	}
 
-	// Get current HEAD for BaseSHA.
-	baseSHA, err := gitHead(workDir)
+	s := &store.Store{Root: storeRoot}
+	orch := orchestrator.New(s, orchestrator.Config{
+		MaxIterations: *maxIterations,
+		MaxBudgetUSD:  *maxBudget,
+		RepoDir:       workDir,
+	})
+
+	if err := orch.LoadExisting(); err != nil {
+		slog.Error("failed to load existing streams", "err", err)
+		return 1
+	}
+
+	if *headless {
+		return runHeadless(orch, workDir, *task, *maxIterations, *maxBudget)
+	}
+
+	return runTUI(orch)
+}
+
+func runTUI(orch *orchestrator.Orchestrator) int {
+	p := tea.NewProgram(ui.New(orch), tea.WithAltScreen())
+	orch.SetSink(&ui.EventSink{Program: p})
+
+	if _, err := p.Run(); err != nil {
+		slog.Error("TUI error", "err", err)
+		return 1
+	}
+	return 0
+}
+
+func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxIterations int, maxBudget string) int {
+	if task == "" {
+		fmt.Fprintln(os.Stderr, "error: --task is required in headless mode")
+		flag.Usage()
+		return 1
+	}
+
+	st, err := orch.Create(task)
 	if err != nil {
-		slog.Error("failed to get git HEAD", "err", err)
+		slog.Error("failed to create stream", "err", err)
 		return 1
 	}
 
-	// Create git worktree.
-	streamID := parentID
-	branch := "streams/" + streamID
-	worktreePath := workDir + "/.streams/worktrees/" + streamID
-	if err := createWorktree(workDir, worktreePath, branch); err != nil {
-		slog.Error("failed to create git worktree", "err", err)
-		return 1
-	}
-
-	s := &stream.Stream{
-		ID:            streamID,
-		Name:          *task,
-		Task:          *task,
-		Mode:          stream.ModeAutonomous,
-		Status:        stream.StatusCreated,
-		Pipeline:      []string{"coding"},
-		PipelineIndex: 0,
-		BeadsParentID: parentID,
-		BaseSHA:       baseSHA,
-		Branch:        branch,
-		WorkTree:      worktreePath,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-	}
-
-	rt := &budgetRuntime{
-		inner:     &claude.Runtime{WorkDir: worktreePath},
-		maxBudget: *maxBudget,
-	}
-	beads := &loop.CLIBeadsQuerier{WorkDir: worktreePath}
-	phase := &loop.CodingPhase{}
-
-	// Set up context with signal handling.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -108,20 +100,27 @@ func run() int {
 		cancel()
 	}()
 
-	loop.Run(ctx, s, phase, rt, beads, *maxIterations)
+	rt := &budgetRuntime{
+		inner:     &claude.Runtime{WorkDir: st.WorkTree},
+		maxBudget: maxBudget,
+	}
+	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
+	phase := &loop.CodingPhase{}
+
+	loop.Run(ctx, st, phase, rt, beads, maxIterations)
 
 	switch {
-	case s.GetStatus() == stream.StatusStopped:
+	case st.GetStatus() == stream.StatusStopped:
 		slog.Info("stream stopped (cancelled)")
 		return 0
-	case s.Converged:
-		slog.Info("stream converged", "iterations", s.GetIteration()+1)
+	case st.Converged:
+		slog.Info("stream converged", "iterations", st.GetIteration()+1)
 		return 0
-	case s.LastError != nil:
-		slog.Error("stream error", "kind", s.LastError.Kind, "step", s.LastError.Step, "msg", s.LastError.Message)
+	case st.LastError != nil:
+		slog.Error("stream error", "kind", st.LastError.Kind, "step", st.LastError.Step, "msg", st.LastError.Message)
 		return 1
 	default:
-		slog.Warn("max iterations reached", "max", *maxIterations)
+		slog.Warn("max iterations reached", "max", maxIterations)
 		return 2
 	}
 }
@@ -137,57 +136,11 @@ func resolveDir(dir string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", dir)
 	}
-	if !strings.HasPrefix(dir, "/") {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		return wd + "/" + dir, nil
-	}
-	return dir, nil
-}
-
-func createBeadsParent(task, workDir string) (string, error) {
-	cmd := exec.Command("bd", "create", "--title", task, "--type", "task", "--priority", "2")
-	cmd.Dir = workDir
-	out, err := cmd.Output()
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return "", fmt.Errorf("bd create: %w", err)
+		return "", err
 	}
-	line := strings.TrimSpace(string(out))
-	return parseBeadsID(line), nil
-}
-
-func parseBeadsID(output string) string {
-	// Format: "✓ Created streams-abc: ..." or similar
-	fields := strings.Fields(output)
-	for _, f := range fields {
-		f = strings.TrimSuffix(f, ":")
-		if strings.Contains(f, "-") && !strings.HasPrefix(f, "✓") && !strings.EqualFold(f, "Created") {
-			return f
-		}
-	}
-	return strings.TrimSpace(output)
-}
-
-func gitHead(workDir string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = workDir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func createWorktree(repoDir, worktreePath, branch string) error {
-	cmd := exec.Command("git", "worktree", "add", worktreePath, "-b", branch)
-	cmd.Dir = repoDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git worktree add: %s: %w", out, err)
-	}
-	return nil
+	return abs, nil
 }
 
 // budgetRuntime wraps a runtime to inject max-budget-usd into every request.
