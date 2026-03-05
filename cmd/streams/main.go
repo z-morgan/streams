@@ -105,9 +105,10 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 		maxBudget: maxBudget,
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
+	git := &loop.CLIGitQuerier{}
 	phase := &loop.CodingPhase{}
 
-	loop.Run(ctx, st, phase, rt, beads, maxIterations)
+	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase)
 
 	switch {
 	case st.GetStatus() == stream.StatusStopped:

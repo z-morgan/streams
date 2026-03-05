@@ -183,6 +183,7 @@ func (o *Orchestrator) Start(id string) error {
 		maxBudget: o.config.MaxBudgetUSD,
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
+	git := &loop.CLIGitQuerier{}
 	phaseName := st.Pipeline[st.PipelineIndex]
 	phase, err := loop.NewPhase(phaseName)
 	if err != nil {
@@ -192,7 +193,7 @@ func (o *Orchestrator) Start(id string) error {
 	o.emit(Event{StreamID: id, Kind: EventStarted})
 
 	go func() {
-		loop.Run(ctx, st, phase, rt, beads, o.config.MaxIterations)
+		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, loop.NewPhase)
 
 		// Persist final state.
 		o.checkpoint(st)

@@ -20,11 +20,14 @@ const orchestratorRules = `## Stream Orchestrator Rules (these override any conf
 - Follow the tool restrictions enforced by --allowedTools. Do not attempt to use tools outside that list.
 - All other CLAUDE.md instructions (coding style, naming conventions, test patterns, project structure) remain in effect.`
 
+// PhaseFactory creates a MacroPhase by pipeline phase name.
+type PhaseFactory func(name string) (MacroPhase, error)
+
 // Run drives the iteration loop for a single stream. It blocks until the phase
 // converges, an error occurs, the context is cancelled, or maxIterations is
 // reached (0 means unlimited). Outcome is reflected in stream state
 // (StatusPaused+Converged, StatusPaused+LastError, or StatusStopped).
-func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, maxIterations int) {
+func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, git GitQuerier, maxIterations int, factory PhaseFactory) {
 	s.SetStatus(stream.StatusRunning)
 
 	var pendingGuidance []stream.Guidance
@@ -62,9 +65,15 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// --- StepImplement ---
 		s.SetIterStep(stream.StepImplement)
 
-		openBefore, err := beads.CountOpenChildren(s.BeadsParentID)
+		idsBefore, err := beads.ListOpenChildren(s.BeadsParentID)
 		if err != nil {
-			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to count open children", err.Error())
+			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to list open children", err.Error())
+			return
+		}
+
+		headBefore, err := git.HeadSHA(s.WorkTree)
+		if err != nil {
+			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to get HEAD SHA", err.Error())
 			return
 		}
 
@@ -85,14 +94,22 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
-		openAfterImpl, err := beads.CountOpenChildren(s.BeadsParentID)
+		idsAfterImpl, err := beads.ListOpenChildren(s.BeadsParentID)
 		if err != nil {
-			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to count open children after implement", err.Error())
+			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to list open children after implement", err.Error())
 			return
 		}
 
+		headAfterImpl, err := git.HeadSHA(s.WorkTree)
+		if err != nil {
+			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to get HEAD SHA after implement", err.Error())
+			return
+		}
+
+		beadsClosed := setDiff(idsBefore, idsAfterImpl)
+
 		// No-progress check: if not the first iteration and no beads were closed.
-		if iteration > 0 && openAfterImpl >= openBefore {
+		if iteration > 0 && len(beadsClosed) == 0 {
 			recordError(s, phase, stream.ErrNoProgress, stream.StepImplement, "implement step closed zero beads", "")
 			return
 		}
@@ -120,22 +137,29 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
-		openAfterReview, err := beads.CountOpenChildren(s.BeadsParentID)
+		idsAfterReview, err := beads.ListOpenChildren(s.BeadsParentID)
 		if err != nil {
-			recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to count open children after review", err.Error())
+			recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to list open children after review", err.Error())
 			return
 		}
+
+		beadsOpened := setDiff(idsAfterReview, idsAfterImpl)
 
 		// --- Convergence check ---
 		result := IterationResult{
 			ReviewText:         reviewResp.Text,
-			OpenChildrenBefore: openAfterImpl,
-			OpenChildrenAfter:  openAfterReview,
+			OpenChildrenBefore: len(idsAfterImpl),
+			OpenChildrenAfter:  len(idsAfterReview),
+			BeadsClosed:        beadsClosed,
+			BeadsOpened:        beadsOpened,
 		}
 		converged := phase.IsConverged(result)
 
 		// --- StepCheckpoint ---
 		s.SetIterStep(stream.StepCheckpoint)
+
+		diffStat, _ := git.DiffStat(s.WorkTree, headBefore)
+		commitSHAs, _ := git.CommitsBetween(s.WorkTree, headBefore, headAfterImpl)
 
 		snap := stream.Snapshot{
 			Phase:            phase.Name(),
@@ -143,6 +167,10 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			Summary:          implResp.Text,
 			Review:           reviewResp.Text,
 			CostUSD:          implResp.CostUSD + reviewResp.CostUSD,
+			DiffStat:         diffStat,
+			CommitSHAs:       commitSHAs,
+			BeadsClosed:      beadsClosed,
+			BeadsOpened:      beadsOpened,
 			GuidanceConsumed: pendingGuidance,
 			Timestamp:        time.Now(),
 		}
@@ -150,8 +178,27 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 		if converged {
 			s.SetConverged(true)
-			s.SetStatus(stream.StatusPaused)
 			slog.Info("phase converged", "stream", s.ID, "phase", phase.Name(), "iteration", iteration)
+
+			pipeline := s.GetPipeline()
+			nextIdx := s.GetPipelineIndex() + 1
+
+			if phase.TransitionMode() == TransitionAutoAdvance && nextIdx < len(pipeline) {
+				nextPhase, err := factory(pipeline[nextIdx])
+				if err != nil {
+					recordError(s, phase, stream.ErrInfra, stream.StepCheckpoint, "failed to instantiate next phase", err.Error())
+					return
+				}
+				s.SetPipelineIndex(nextIdx)
+				s.SetConverged(false)
+				s.SetIteration(0)
+				phase = nextPhase
+				pendingGuidance = nil
+				slog.Info("auto-advancing pipeline", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
+				continue
+			}
+
+			s.SetStatus(stream.StatusPaused)
 			return
 		}
 
@@ -201,6 +248,21 @@ func recordError(s *stream.Stream, phase MacroPhase, kind stream.ErrorKind, step
 	s.AppendSnapshot(snap)
 
 	slog.Error("loop error", "stream", s.ID, "kind", kind, "step", step, "msg", msg)
+}
+
+// setDiff returns elements in a that are not in b.
+func setDiff(a, b []string) []string {
+	set := make(map[string]struct{}, len(b))
+	for _, id := range b {
+		set[id] = struct{}{}
+	}
+	var diff []string
+	for _, id := range a {
+		if _, ok := set[id]; !ok {
+			diff = append(diff, id)
+		}
+	}
+	return diff
 }
 
 func appendGuidanceSection(prompt string, guidance []stream.Guidance) string {

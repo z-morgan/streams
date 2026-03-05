@@ -17,7 +17,7 @@ type Step struct {
 
 // BeadsQuerier abstracts the beads CLI for testability.
 type BeadsQuerier interface {
-	CountOpenChildren(parentID string) (int, error)
+	ListOpenChildren(parentID string) ([]string, error)
 	FetchOrderedSteps(parentID string) ([]Step, error)
 }
 
@@ -34,19 +34,19 @@ type beadsChild struct {
 	Notes  string `json:"notes"`
 }
 
-func (q *CLIBeadsQuerier) CountOpenChildren(parentID string) (int, error) {
+func (q *CLIBeadsQuerier) ListOpenChildren(parentID string) ([]string, error) {
 	children, err := q.fetchChildren(parentID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	count := 0
+	var ids []string
 	for _, c := range children {
 		if c.Status == "open" || c.Status == "in_progress" {
-			count++
+			ids = append(ids, c.ID)
 		}
 	}
-	return count, nil
+	return ids, nil
 }
 
 func (q *CLIBeadsQuerier) FetchOrderedSteps(parentID string) ([]Step, error) {

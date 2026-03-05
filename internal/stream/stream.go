@@ -157,6 +157,27 @@ func (s *Stream) AppendSnapshot(snap Snapshot) {
 	s.mu.Unlock()
 }
 
+func (s *Stream) SetPipelineIndex(n int) {
+	s.mu.Lock()
+	s.PipelineIndex = n
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetPipelineIndex() int {
+	s.mu.RLock()
+	n := s.PipelineIndex
+	s.mu.RUnlock()
+	return n
+}
+
+func (s *Stream) GetPipeline() []string {
+	s.mu.RLock()
+	p := s.Pipeline
+	s.mu.RUnlock()
+	return p
+}
+
 // DrainGuidance atomically moves all queued guidance items out of the stream
 // and returns them. The stream's guidance queue is emptied.
 func (s *Stream) DrainGuidance() []Guidance {
