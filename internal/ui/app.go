@@ -203,12 +203,16 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "j", "down":
-		m.dashboard.cursor++
-		m.dashboard.clampCursor(len(streams))
+		if m.dashboard.mode == modeList {
+			m.dashboard.cursor++
+			m.dashboard.clampCursor(len(streams))
+		}
 
 	case "k", "up":
-		m.dashboard.cursor--
-		m.dashboard.clampCursor(len(streams))
+		if m.dashboard.mode == modeList {
+			m.dashboard.cursor--
+			m.dashboard.clampCursor(len(streams))
+		}
 
 	case "enter":
 		if st := m.selectedStream(); st != nil {
@@ -264,6 +268,25 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showDeleteConfirm = true
 		} else {
 			return m.setStatus("No stream selected.")
+		}
+
+	case "v":
+		if m.dashboard.mode == modeChannels {
+			m.dashboard.mode = modeList
+		} else {
+			m.dashboard.mode = modeChannels
+		}
+
+	case "h", "left":
+		if m.dashboard.mode == modeChannels {
+			m.dashboard.cursor--
+			m.dashboard.clampCursor(len(streams))
+		}
+
+	case "l", "right":
+		if m.dashboard.mode == modeChannels {
+			m.dashboard.cursor++
+			m.dashboard.clampCursor(len(streams))
 		}
 
 	}
@@ -489,7 +512,13 @@ func (m Model) View() string {
 	case viewDashboard:
 		streams := m.orch.List()
 		m.dashboard.clampCursor(len(streams))
-		body := renderDashboard(streams, m.dashboard.cursor)
+		var body string
+		switch m.dashboard.mode {
+		case modeChannels:
+			body = renderChannels(streams, m.dashboard.cursor, m.dashboard.scrollLeft, m.width, m.height)
+		default:
+			body = renderDashboardList(streams, m.dashboard.cursor)
+		}
 		if m.creating {
 			body += "\n" + helpStyle.Render("Creating stream...")
 		}
@@ -499,7 +528,11 @@ func (m Model) View() string {
 		if m.statusMsg != "" {
 			body += "\n" + helpStyle.Render(m.statusMsg)
 		}
-		footer := helpStyle.Render(dashboardHelp)
+		help := dashboardChannelHelp
+		if m.dashboard.mode == modeList {
+			help = dashboardListHelp
+		}
+		footer := helpStyle.Render(help)
 		return layoutWithFooter(body, footer, m.height)
 
 	case viewDetail:

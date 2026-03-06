@@ -8,8 +8,17 @@ import (
 	"github.com/zmorgan/streams/internal/stream"
 )
 
+type dashboardMode int
+
+const (
+	modeChannels dashboardMode = iota
+	modeList
+)
+
 type dashboardView struct {
-	cursor int
+	cursor     int
+	mode       dashboardMode
+	scrollLeft int // horizontal scroll offset for channel view
 }
 
 func (d *dashboardView) clampCursor(count int) {
@@ -25,7 +34,20 @@ func (d *dashboardView) clampCursor(count int) {
 	}
 }
 
-func renderDashboard(streams []*stream.Stream, cursor int) string {
+func (d *dashboardView) clampScroll(streamCount, visibleCols int) {
+	maxScroll := streamCount - visibleCols
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if d.scrollLeft > maxScroll {
+		d.scrollLeft = maxScroll
+	}
+	if d.scrollLeft < 0 {
+		d.scrollLeft = 0
+	}
+}
+
+func renderDashboardList(streams []*stream.Stream, cursor int) string {
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render("Streams"))
@@ -68,7 +90,26 @@ func renderDashboard(streams []*stream.Stream, cursor int) string {
 	return b.String()
 }
 
-const dashboardHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  q: quit"
+const dashboardListHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  v: channels  q: quit"
+const dashboardChannelHelp = "h/l: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  v: list  q: quit"
+
+func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int) string {
+	var b strings.Builder
+
+	b.WriteString(titleStyle.Render("Streams"))
+	b.WriteString("\n\n")
+
+	if len(streams) == 0 {
+		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	// placeholder — will be replaced in step 4
+	b.WriteString(helpStyle.Render("[channel view]"))
+	b.WriteString("\n")
+	return b.String()
+}
 
 func statusIndicator(st *stream.Stream) string {
 	status := st.GetStatus()
