@@ -93,6 +93,99 @@ func renderDashboardList(streams []*stream.Stream, cursor int) string {
 const dashboardListHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  v: channels  q: quit"
 const dashboardChannelHelp = "h/l: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  v: list  q: quit"
 
+// channelLayout computes column width and visible column count for the
+// terminal width. Columns are between 25 and 40 characters wide.
+func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
+	const minCol = 25
+	const maxCol = 40
+
+	if termWidth < minCol {
+		return termWidth, 1
+	}
+
+	visibleCols = termWidth / minCol
+	if visibleCols > streamCount {
+		visibleCols = streamCount
+	}
+	if visibleCols < 1 {
+		visibleCols = 1
+	}
+
+	colWidth = termWidth / visibleCols
+	if colWidth > maxCol {
+		colWidth = maxCol
+	}
+
+	return colWidth, visibleCols
+}
+
+// renderChannel renders a single stream as a vertical column.
+func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) string {
+	innerWidth := colWidth - 4 // border + padding takes ~4 chars
+
+	// Header: name + status/phase
+	name := truncate(st.Name, innerWidth)
+	status := statusIndicator(st)
+	phase := currentPhase(st)
+
+	header := channelHeaderStyle.Render(name) + "\n" +
+		status + "  " + channelHeaderMutedStyle.Render(phase)
+
+	sep := strings.Repeat("─", innerWidth)
+
+	// Iteration rows from snapshots
+	snapshots := st.GetSnapshots()
+	var rows []string
+	for _, snap := range snapshots {
+		label := fmt.Sprintf("%s %d", snap.Phase, snap.Iteration)
+		summary := truncate(snap.Summary, innerWidth-len(label)-2)
+		row := fmt.Sprintf("%s: %s", label, summary)
+
+		style := iterRowStyle
+		if snap.Error != nil {
+			row = "! " + row
+			style = iterRowErrorStyle
+		}
+
+		rows = append(rows, style.Render(truncate(row, innerWidth)))
+	}
+
+	// In-progress indicator for running streams
+	if st.GetStatus() == stream.StatusRunning {
+		step := st.GetIterStep()
+		iter := st.GetIteration()
+		indicator := fmt.Sprintf("> %s %d...", currentPhase(st), iter)
+		if step != stream.StepImplement {
+			indicator = fmt.Sprintf("> %s %d (%s)...", currentPhase(st), iter, step)
+		}
+		rows = append(rows, inProgressStyle.Render(truncate(indicator, innerWidth)))
+	}
+
+	// Guidance count
+	if gc := st.GetGuidanceCount(); gc > 0 {
+		rows = append(rows, helpStyle.Render(fmt.Sprintf("[%d queued]", gc)))
+	}
+
+	// Vertical auto-scroll: show only last N rows that fit
+	// availHeight accounts for header (2 lines) + separator (1 line)
+	maxRows := availHeight - 3
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	if len(rows) > maxRows {
+		rows = rows[len(rows)-maxRows:]
+	}
+
+	content := header + "\n" + sep + "\n" + strings.Join(rows, "\n")
+
+	borderStyle := channelBorderStyle
+	if selected {
+		borderStyle = channelSelectedBorderStyle
+	}
+
+	return borderStyle.Width(innerWidth).Render(content)
+}
+
 func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int) string {
 	var b strings.Builder
 
@@ -105,8 +198,41 @@ func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height 
 		return b.String()
 	}
 
-	// placeholder — will be replaced in step 4
-	b.WriteString(helpStyle.Render("[channel view]"))
+	colWidth, visibleCols := channelLayout(len(streams), width)
+
+	// Height available for columns: total minus title (2 lines), footer gap, help line
+	availHeight := height - 5
+	if availHeight < 5 {
+		availHeight = 5
+	}
+
+	// Render visible columns
+	var columns []string
+	endIdx := scrollLeft + visibleCols
+	if endIdx > len(streams) {
+		endIdx = len(streams)
+	}
+
+	for i := scrollLeft; i < endIdx; i++ {
+		col := renderChannel(streams[i], colWidth, availHeight, i == cursor)
+		columns = append(columns, col)
+	}
+
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, columns...))
+
+	// Scroll indicators
+	var indicators []string
+	if scrollLeft > 0 {
+		indicators = append(indicators, "<")
+	}
+	if endIdx < len(streams) {
+		indicators = append(indicators, ">")
+	}
+	if len(indicators) > 0 {
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render(strings.Join(indicators, "  ")))
+	}
+
 	b.WriteString("\n")
 	return b.String()
 }

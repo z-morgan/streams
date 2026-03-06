@@ -281,12 +281,14 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.dashboard.mode == modeChannels {
 			m.dashboard.cursor--
 			m.dashboard.clampCursor(len(streams))
+			m.autoScrollChannels(len(streams))
 		}
 
 	case "l", "right":
 		if m.dashboard.mode == modeChannels {
 			m.dashboard.cursor++
 			m.dashboard.clampCursor(len(streams))
+			m.autoScrollChannels(len(streams))
 		}
 
 	}
@@ -631,6 +633,18 @@ func (m Model) inputWidth() int {
 		w = 20
 	}
 	return w
+}
+
+// autoScrollChannels adjusts scrollLeft so the cursor stays in the visible window.
+func (m *Model) autoScrollChannels(streamCount int) {
+	_, visibleCols := channelLayout(streamCount, m.width)
+	if m.dashboard.cursor < m.dashboard.scrollLeft {
+		m.dashboard.scrollLeft = m.dashboard.cursor
+	}
+	if m.dashboard.cursor >= m.dashboard.scrollLeft+visibleCols {
+		m.dashboard.scrollLeft = m.dashboard.cursor - visibleCols + 1
+	}
+	m.dashboard.clampScroll(streamCount, visibleCols)
 }
 
 // selectedStream returns the stream at the dashboard cursor, or nil.
