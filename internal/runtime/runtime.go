@@ -4,8 +4,9 @@ import "context"
 
 // Request holds the prompt and runtime-specific options for a single invocation.
 type Request struct {
-	Prompt  string
-	Options map[string]string // runtime-specific flags (allowedTools, appendSystemPrompt, maxBudgetUsd)
+	Prompt   string
+	Options  map[string]string // runtime-specific flags (allowedTools, appendSystemPrompt, maxBudgetUsd)
+	OnOutput func(line string) // optional callback for live streaming output lines
 }
 
 // Response holds the result of a single runtime invocation.

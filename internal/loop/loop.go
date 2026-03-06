@@ -29,6 +29,7 @@ type PhaseFactory func(name string) (MacroPhase, error)
 // (StatusPaused+Converged, StatusPaused+LastError, or StatusStopped).
 func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, git GitQuerier, maxIterations int, factory PhaseFactory, onCheckpoint func(*stream.Stream)) {
 	s.SetStatus(stream.StatusRunning)
+	s.ClearOutput()
 
 	var pendingGuidance []stream.Guidance
 
@@ -83,6 +84,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 
 		implReq := buildRequest(implPrompt, phase.ImplementTools())
+		implReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		implResp, err := rt.Run(ctx, implReq)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -126,6 +128,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		s.SetIterStep(stream.StepReview)
 
 		reviewReq := buildRequest(phase.ReviewPrompt(pctx), phase.ReviewTools())
+		reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		reviewResp, err := rt.Run(ctx, reviewReq)
 		if err != nil {
 			if ctx.Err() != nil {

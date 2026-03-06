@@ -70,4 +70,9 @@ var (
 
 	helpStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
+
+	// Tail view styles
+	toolLineStyle = lipgloss.NewStyle().
+			Foreground(colorSecondary).
+			Bold(true)
 )

@@ -15,8 +15,13 @@
 //	duration_api_ms int    — API-only duration
 //	stop_reason    string  — "end_turn", "tool_use"
 //
-// The usage and modelUsage fields contain token breakdowns but are not needed
-// for the runtime interface — we only extract result text and total_cost_usd.
+// # Stream JSON Format (claude -p --output-format stream-json)
+//
+// The CLI emits NDJSON (one JSON object per line). Key event types:
+//
+//	type "system"    — subtype "init", contains session_id
+//	type "assistant" — contains message with content blocks (text, tool_use)
+//	type "result"    — final result, same fields as json format
 //
 // # Subtypes
 //
@@ -33,6 +38,8 @@
 // exit code OR is_error == true.
 package claude
 
+import "encoding/json"
+
 // cliResult is the subset of fields we parse from claude -p --output-format json.
 type cliResult struct {
 	Type         string  `json:"type"`
@@ -44,4 +51,32 @@ type cliResult struct {
 	NumTurns     int     `json:"num_turns"`
 	DurationMS   int     `json:"duration_ms"`
 	StopReason   string  `json:"stop_reason"`
+}
+
+// streamEvent is the envelope for NDJSON events from --output-format stream-json.
+type streamEvent struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype,omitempty"`
+
+	// Present for type "assistant"
+	Message streamMessage `json:"message"`
+
+	// Present for type "result"
+	IsError      bool    `json:"is_error,omitempty"`
+	Result       string  `json:"result,omitempty"`
+	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+	SessionID    string  `json:"session_id,omitempty"`
+	NumTurns     int     `json:"num_turns,omitempty"`
+	DurationMS   int     `json:"duration_ms,omitempty"`
+}
+
+type streamMessage struct {
+	Content []contentBlock `json:"content"`
+}
+
+type contentBlock struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }

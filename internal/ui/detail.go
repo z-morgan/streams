@@ -57,7 +57,7 @@ func renderDetail(st *stream.Stream, snapCursor int, width, height int) string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("j/k: snapshots  s: start  x: stop  g: guidance  q/esc: back"))
+	b.WriteString(helpStyle.Render("j/k: snapshots  t: tail  s: start  x: stop  g: guidance  q/esc: back"))
 
 	return b.String()
 }

@@ -76,6 +76,8 @@ func (s Status) String() string {
 	return fmt.Sprintf("Status(%d)", int(s))
 }
 
+const maxOutputLines = 200
+
 // Stream is the central state model for a running autonomous code generation loop.
 // Thread-safe via sync.RWMutex — the TUI reads state while the loop goroutine writes.
 type Stream struct {
@@ -97,6 +99,7 @@ type Stream struct {
 	LastError     *LoopError
 	Snapshots     []Snapshot
 	Guidance      []Guidance
+	OutputLines   []string // ring buffer of recent CLI output for tail view
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -224,4 +227,31 @@ func (s *Stream) DrainGuidance() []Guidance {
 	s.Guidance = nil
 	s.mu.Unlock()
 	return g
+}
+
+// AppendOutput adds a line to the output ring buffer, dropping the oldest
+// line if the buffer is full.
+func (s *Stream) AppendOutput(line string) {
+	s.mu.Lock()
+	s.OutputLines = append(s.OutputLines, line)
+	if len(s.OutputLines) > maxOutputLines {
+		s.OutputLines = s.OutputLines[len(s.OutputLines)-maxOutputLines:]
+	}
+	s.mu.Unlock()
+}
+
+// ClearOutput resets the output ring buffer.
+func (s *Stream) ClearOutput() {
+	s.mu.Lock()
+	s.OutputLines = nil
+	s.mu.Unlock()
+}
+
+// GetOutputLines returns a copy of the output ring buffer.
+func (s *Stream) GetOutputLines() []string {
+	s.mu.RLock()
+	lines := make([]string, len(s.OutputLines))
+	copy(lines, s.OutputLines)
+	s.mu.RUnlock()
+	return lines
 }
