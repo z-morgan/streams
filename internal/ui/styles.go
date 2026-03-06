@@ -75,4 +75,30 @@ var (
 	toolLineStyle = lipgloss.NewStyle().
 			Foreground(colorSecondary).
 			Bold(true)
+
+	// Channel view styles
+	channelBorderStyle = lipgloss.NewStyle().
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(colorMuted)
+
+	channelSelectedBorderStyle = lipgloss.NewStyle().
+					BorderStyle(lipgloss.NormalBorder()).
+					BorderForeground(colorPrimary)
+
+	channelHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorPrimary)
+
+	channelHeaderMutedStyle = lipgloss.NewStyle().
+				Foreground(colorSecondary)
+
+	iterRowStyle = lipgloss.NewStyle().
+			Foreground(colorSecondary)
+
+	iterRowErrorStyle = lipgloss.NewStyle().
+				Foreground(colorError)
+
+	inProgressStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorPrimary)
 )

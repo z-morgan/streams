@@ -125,6 +125,13 @@ func (s *Stream) SetIterStep(step IterStep) {
 	s.mu.Unlock()
 }
 
+func (s *Stream) GetIterStep() IterStep {
+	s.mu.RLock()
+	step := s.IterStep
+	s.mu.RUnlock()
+	return step
+}
+
 func (s *Stream) SetIteration(n int) {
 	s.mu.Lock()
 	s.Iteration = n
