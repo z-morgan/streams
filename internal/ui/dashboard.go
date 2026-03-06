@@ -99,6 +99,10 @@ func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
 	const minCol = 25
 	const maxCol = 40
 
+	if streamCount == 0 {
+		return 0, 0
+	}
+
 	if termWidth < minCol {
 		return termWidth, 1
 	}
