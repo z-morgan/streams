@@ -268,9 +268,10 @@ func (o *Orchestrator) Stop(id string) {
 	}
 }
 
-// Delete removes a stream's worktree and disk data. Returns an error if the
-// stream is currently running.
-func (o *Orchestrator) Delete(id string) error {
+// Delete removes a stream's worktree and disk data. If cleanup is true, the
+// git branch and beads issue are also removed. Returns an error if the stream
+// is currently running.
+func (o *Orchestrator) Delete(id string, cleanup bool) error {
 	o.mu.Lock()
 	st := o.streams[id]
 	if st == nil {
@@ -284,6 +285,8 @@ func (o *Orchestrator) Delete(id string) error {
 	delete(o.streams, id)
 	delete(o.snaps, id)
 	worktree := st.WorkTree
+	branch := st.Branch
+	beadsID := st.BeadsParentID
 	o.mu.Unlock()
 
 	// Remove git worktree.
@@ -291,6 +294,32 @@ func (o *Orchestrator) Delete(id string) error {
 	cmd.Dir = o.config.RepoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		slog.Warn("git worktree remove failed", "path", worktree, "err", err, "output", strings.TrimSpace(string(out)))
+	}
+
+	if cleanup {
+		// Delete the git branch.
+		if branch != "" {
+			cmd = exec.Command("git", "branch", "-D", branch)
+			cmd.Dir = o.config.RepoDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				slog.Warn("git branch delete failed", "branch", branch, "err", err, "output", strings.TrimSpace(string(out)))
+			}
+		}
+
+		// Close and delete the beads issue.
+		if beadsID != "" {
+			cmd = exec.Command("bd", "close", beadsID, "--reason", "stream deleted")
+			cmd.Dir = o.config.RepoDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				slog.Warn("bd close failed", "id", beadsID, "err", err, "output", strings.TrimSpace(string(out)))
+			}
+
+			cmd = exec.Command("bd", "delete", beadsID, "--force")
+			cmd.Dir = o.config.RepoDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				slog.Warn("bd delete failed", "id", beadsID, "err", err, "output", strings.TrimSpace(string(out)))
+			}
+		}
 	}
 
 	if err := o.store.Delete(id); err != nil {

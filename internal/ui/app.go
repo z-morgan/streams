@@ -404,7 +404,14 @@ func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			id := m.deleteTargetID
 			orch := m.orch
 			return m, func() tea.Msg {
-				return streamDeletedMsg{err: orch.Delete(id)}
+				return streamDeletedMsg{err: orch.Delete(id, true)}
+			}
+		case "k":
+			m.showDeleteConfirm = false
+			id := m.deleteTargetID
+			orch := m.orch
+			return m, func() tea.Msg {
+				return streamDeletedMsg{err: orch.Delete(id, false)}
 			}
 		case "n", "esc":
 			m.showDeleteConfirm = false
@@ -514,9 +521,7 @@ func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
 func renderDeleteConfirmOverlay(name string, width, height int) string {
 	overlay := titleStyle.Render("Delete Stream") + "\n\n"
 	overlay += fmt.Sprintf("Delete %q?\n\n", name)
-	overlay += "The git branch and beads issue will remain\n"
-	overlay += "intact for manual cleanup.\n\n"
-	overlay += helpStyle.Render("y: delete  n/esc: cancel")
+	overlay += helpStyle.Render("y: delete + clean up branch/beads  k: keep branch/beads  esc: cancel")
 
 	maxWidth := width - 6
 	if maxWidth < 40 {
