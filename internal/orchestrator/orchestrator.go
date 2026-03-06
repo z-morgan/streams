@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -154,6 +155,9 @@ func (o *Orchestrator) List() []*stream.Stream {
 	for _, st := range o.streams {
 		result = append(result, st)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.Before(result[j].CreatedAt)
+	})
 	return result
 }
 
@@ -279,7 +283,7 @@ func (o *Orchestrator) emit(e Event) {
 	sink := o.sink
 	o.mu.RUnlock()
 	if sink != nil {
-		sink.Send(e)
+		go sink.Send(e)
 	}
 }
 

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -36,10 +35,6 @@ func renderDashboard(streams []*stream.Stream, cursor int, width, height int) st
 		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
 		b.WriteString("\n")
 	} else {
-		sort.Slice(streams, func(i, j int) bool {
-			return streams[i].CreatedAt.Before(streams[j].CreatedAt)
-		})
-
 		for i, st := range streams {
 			prefix := "  "
 			style := normalRowStyle

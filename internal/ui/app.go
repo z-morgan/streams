@@ -165,7 +165,9 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "s":
 		if st := m.selectedStream(); st != nil {
-			m.orch.Start(st.ID)
+			if err := m.orch.Start(st.ID); err != nil {
+				return m.setStatus("Start error: " + err.Error())
+			}
 		} else {
 			return m.setStatus("No stream selected. Press n to create one.")
 		}
@@ -217,7 +219,9 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "s":
 		if st != nil {
-			m.orch.Start(st.ID)
+			if err := m.orch.Start(st.ID); err != nil {
+				return m.setStatus("Start error: " + err.Error())
+			}
 		}
 
 	case "x":

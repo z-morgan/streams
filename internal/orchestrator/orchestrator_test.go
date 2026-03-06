@@ -138,6 +138,9 @@ func TestEventSink(t *testing.T) {
 
 	o.emit(Event{StreamID: "test", Kind: EventStarted})
 
+	// emit is async (goroutine), give it a moment to deliver.
+	time.Sleep(50 * time.Millisecond)
+
 	events := sink.Events()
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
