@@ -42,14 +42,26 @@ type Model struct {
 	newStreamInput textinput.Model
 	creating       bool // true while orch.Create is running
 
+	// Beads init prompt state.
+	showBeadsInit bool
+	pendingTask   string // task stashed while waiting for stealth answer
+
 	// Ephemeral status message shown at bottom of dashboard.
 	statusMsg string
+
+	// Persistent error message, cleared on next keypress.
+	errorMsg string
 }
 
 // streamCreatedMsg is sent when orch.Create finishes.
 type streamCreatedMsg struct {
 	stream *stream.Stream
 	err    error
+}
+
+// beadsInitDoneMsg is sent when bd init finishes.
+type beadsInitDoneMsg struct {
+	err error
 }
 
 // New creates a new TUI model.
@@ -61,7 +73,6 @@ func New(orch *orchestrator.Orchestrator) Model {
 	ni := textinput.New()
 	ni.Placeholder = "Describe the task..."
 	ni.CharLimit = 200
-	ni.Width = 60
 
 	return Model{
 		orch:           orch,
@@ -85,6 +96,24 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle window resize globally before overlays.
+	if msg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = msg.Width
+		m.height = msg.Height
+		m.newStreamInput.Width = m.inputWidth()
+		return m, nil
+	}
+
+	// Clear persistent error on any keypress.
+	if _, ok := msg.(tea.KeyMsg); ok {
+		m.errorMsg = ""
+	}
+
+	// Handle beads init prompt if active.
+	if m.showBeadsInit {
+		return m.updateBeadsInit(msg)
+	}
+
 	// Handle new stream overlay input first if active.
 	if m.showNewStream {
 		return m.updateNewStream(msg)
@@ -96,11 +125,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return m, nil
-
 	case tea.KeyMsg:
 		switch m.view {
 		case viewDashboard:
@@ -109,11 +133,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDetail(msg)
 		}
 
+	case beadsInitDoneMsg:
+		if msg.err != nil {
+			m.creating = false
+			m.errorMsg = "Error initializing beads: " + msg.err.Error()
+			return m, nil
+		}
+		task := m.pendingTask
+		orch := m.orch
+		return m, func() tea.Msg {
+			st, err := orch.Create(task)
+			return streamCreatedMsg{stream: st, err: err}
+		}
+
 	case streamCreatedMsg:
 		m.creating = false
 		if msg.err != nil {
-			m.statusMsg = "Error creating stream: " + msg.err.Error()
-			return m, clearStatusAfter(3 * time.Second)
+			m.errorMsg = "Error creating stream: " + msg.err.Error()
+			return m, nil
 		}
 		return m, nil
 
@@ -160,6 +197,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.showNewStream = true
 		m.newStreamInput.Reset()
+		m.newStreamInput.Width = m.inputWidth()
 		m.newStreamInput.Focus()
 		return m, textinput.Blink
 
@@ -255,6 +293,11 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.showNewStream = false
+			if m.orch.NeedsBeadsInit() {
+				m.pendingTask = task
+				m.showBeadsInit = true
+				return m, nil
+			}
 			m.creating = true
 			orch := m.orch
 			return m, func() tea.Msg {
@@ -267,6 +310,33 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.newStreamInput, cmd = m.newStreamInput.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y":
+			m.showBeadsInit = false
+			m.creating = true
+			orch := m.orch
+			return m, func() tea.Msg {
+				return beadsInitDoneMsg{err: orch.InitBeads(true)}
+			}
+		case "n":
+			m.showBeadsInit = false
+			m.creating = true
+			orch := m.orch
+			return m, func() tea.Msg {
+				return beadsInitDoneMsg{err: orch.InitBeads(false)}
+			}
+		case "esc":
+			m.showBeadsInit = false
+			m.pendingTask = ""
+			return m, nil
+		}
+	}
+	return m, nil
 }
 
 func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -293,6 +363,10 @@ func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.showBeadsInit {
+		return renderBeadsInitOverlay(m.width, m.height)
+	}
+
 	if m.showNewStream {
 		return renderNewStreamOverlay(m.newStreamInput, m.width, m.height)
 	}
@@ -308,6 +382,9 @@ func (m Model) View() string {
 		content := renderDashboard(streams, m.dashboard.cursor, m.width, m.height)
 		if m.creating {
 			content += "\n\n" + helpStyle.Render("Creating stream...")
+		}
+		if m.errorMsg != "" {
+			content += "\n\n" + errorBlockStyle.Render(m.errorMsg)
 		}
 		if m.statusMsg != "" {
 			content += "\n\n" + helpStyle.Render(m.statusMsg)
@@ -327,6 +404,25 @@ func renderNewStreamOverlay(ti textinput.Model, width, height int) string {
 	overlay := titleStyle.Render("New Stream") + "\n\n"
 	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("enter: create  esc: cancel")
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderBeadsInitOverlay(width, height int) string {
+	overlay := titleStyle.Render("Initialize Beads") + "\n\n"
+	overlay += "This repository doesn't have beads initialized.\n"
+	overlay += "Streams uses beads to track issues for each stream.\n\n"
+	overlay += "Stealth mode keeps beads files out of git history,\n"
+	overlay += "so they won't show up in commits or affect collaborators.\n"
+	overlay += "Use this for repos you don't own.\n\n"
+	overlay += helpStyle.Render("y: stealth mode  n: normal mode  esc: cancel")
 
 	maxWidth := width - 6
 	if maxWidth < 40 {
@@ -362,6 +458,16 @@ func clearStatusAfter(d time.Duration) tea.Cmd {
 func (m Model) setStatus(msg string) (Model, tea.Cmd) {
 	m.statusMsg = msg
 	return m, clearStatusAfter(2 * time.Second)
+}
+
+// inputWidth returns the usable width for text inputs inside overlay boxes.
+// Accounts for the outer margin (6), overlay border (2), and overlay padding (4).
+func (m Model) inputWidth() int {
+	w := m.width - 12
+	if w < 20 {
+		w = 20
+	}
+	return w
 }
 
 // selectedStream returns the stream at the dashboard cursor, or nil.

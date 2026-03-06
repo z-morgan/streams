@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -89,6 +91,28 @@ func (o *Orchestrator) LoadExisting() error {
 		o.snaps[st.ID] = len(st.Snapshots)
 	}
 	slog.Info("loaded existing streams", "count", len(loaded))
+	return nil
+}
+
+// NeedsBeadsInit returns true if the target repo doesn't have beads initialized.
+func (o *Orchestrator) NeedsBeadsInit() bool {
+	_, err := os.Stat(filepath.Join(o.config.RepoDir, ".beads"))
+	return os.IsNotExist(err)
+}
+
+// InitBeads initializes beads in the target repo.
+// If stealth is true, beads files are kept out of git history.
+func (o *Orchestrator) InitBeads(stealth bool) error {
+	args := []string{"init", "--skip-hooks", "--quiet"}
+	if stealth {
+		args = append(args, "--stealth")
+	}
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = o.config.RepoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd init: %s", strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 
@@ -290,9 +314,9 @@ func (o *Orchestrator) emit(e Event) {
 func createBeadsParent(task, workDir string) (string, error) {
 	cmd := exec.Command("bd", "create", "--title", task, "--type", "task", "--priority", "2")
 	cmd.Dir = workDir
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("bd create: %w", err)
+		return "", fmt.Errorf("bd create: %s", strings.TrimSpace(string(out)))
 	}
 	return parseBeadsID(strings.TrimSpace(string(out))), nil
 }
