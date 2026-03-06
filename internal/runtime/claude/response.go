@@ -15,13 +15,16 @@
 //	duration_api_ms int    — API-only duration
 //	stop_reason    string  — "end_turn", "tool_use"
 //
-// # Stream JSON Format (claude -p --output-format stream-json)
+// # Stream JSON Format (claude -p --verbose --output-format stream-json)
 //
-// The CLI emits NDJSON (one JSON object per line). Key event types:
+// The CLI emits NDJSON (one JSON object per line). Requires --verbose flag.
+// With --include-partial-messages, key event types:
 //
-//	type "system"    — subtype "init", contains session_id
-//	type "assistant" — contains message with content blocks (text, tool_use)
-//	type "result"    — final result, same fields as json format
+//	type "stream_event" — wraps raw API events (content_block_delta, etc.) in .event field
+//	type "assistant"    — complete message with content blocks (emitted after each turn)
+//	type "result"       — final result, same fields as json format
+//
+// Without --include-partial-messages, only "assistant" and "result" events are emitted.
 //
 // # Subtypes
 //
@@ -54,11 +57,18 @@ type cliResult struct {
 }
 
 // streamEvent is the envelope for NDJSON events from --output-format stream-json.
+//
+// With --include-partial-messages, most events have type "stream_event" wrapping
+// raw Claude API streaming events in the Event field. Without it, complete
+// assistant messages arrive as type "assistant". The final event is type "result".
 type streamEvent struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype,omitempty"`
 
-	// Present for type "assistant"
+	// Present for type "stream_event" (with --include-partial-messages)
+	Event json.RawMessage `json:"event,omitempty"`
+
+	// Present for type "assistant" (complete message, without --include-partial-messages)
 	Message streamMessage `json:"message"`
 
 	// Present for type "result"
@@ -79,4 +89,17 @@ type contentBlock struct {
 	Text  string          `json:"text,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+}
+
+// apiStreamEvent is a raw Claude API streaming event (nested inside stream_event).
+type apiStreamEvent struct {
+	Type         string       `json:"type"`
+	ContentBlock contentBlock `json:"content_block,omitempty"`
+	Delta        apiDelta     `json:"delta,omitempty"`
+}
+
+// apiDelta represents an incremental content update from the API.
+type apiDelta struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }

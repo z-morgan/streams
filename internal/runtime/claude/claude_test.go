@@ -155,6 +155,68 @@ func TestRunContextCancelled(t *testing.T) {
 	}
 }
 
+func TestRunStreamingTextDeltas(t *testing.T) {
+	dir := t.TempDir()
+	// Simulate stream-json output with stream_event lines followed by a result.
+	ndjson := `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello "}}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"world\n"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Second line"}}}
+{"type":"stream_event","event":{"type":"content_block_stop"}}
+{"type":"result","subtype":"success","is_error":false,"result":"Hello world\nSecond line","total_cost_usd":0.03,"session_id":"s-1","num_turns":1,"duration_ms":500}`
+
+	fakeClaude := writeFakeClaude(t, dir, ndjson, 0)
+
+	var lines []string
+	rt := &Runtime{Command: fakeClaude}
+	resp, err := rt.Run(context.Background(), runtime.Request{
+		Prompt:   "say hello",
+		OnOutput: func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Text != "Hello world\nSecond line" {
+		t.Errorf("got text %q, want %q", resp.Text, "Hello world\nSecond line")
+	}
+	if len(lines) != 2 {
+		t.Fatalf("got %d output lines, want 2: %v", len(lines), lines)
+	}
+	if lines[0] != "Hello world" {
+		t.Errorf("line[0] = %q, want %q", lines[0], "Hello world")
+	}
+	if lines[1] != "Second line" {
+		t.Errorf("line[1] = %q, want %q", lines[1], "Second line")
+	}
+}
+
+func TestRunStreamingToolUse(t *testing.T) {
+	dir := t.TempDir()
+	ndjson := `{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/test.go"}}}}
+{"type":"stream_event","event":{"type":"content_block_stop"}}
+{"type":"result","subtype":"success","is_error":false,"result":"done","total_cost_usd":0.02,"session_id":"s-2","num_turns":1,"duration_ms":300}`
+
+	fakeClaude := writeFakeClaude(t, dir, ndjson, 0)
+
+	var lines []string
+	rt := &Runtime{Command: fakeClaude}
+	resp, err := rt.Run(context.Background(), runtime.Request{
+		Prompt:   "read file",
+		OnOutput: func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Text != "done" {
+		t.Errorf("got text %q, want %q", resp.Text, "done")
+	}
+	if len(lines) != 1 {
+		t.Fatalf("got %d output lines, want 1: %v", len(lines), lines)
+	}
+	if lines[0] != "> Read /tmp/test.go" {
+		t.Errorf("line[0] = %q, want %q", lines[0], "> Read /tmp/test.go")
+	}
+}
+
 func TestRunMalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	fakeClaude := writeFakeClaude(t, dir, `not json at all`, 0)

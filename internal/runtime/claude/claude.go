@@ -84,7 +84,7 @@ func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Re
 
 // runStreaming uses --output-format stream-json and parses NDJSON events.
 func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runtime.Response, error) {
-	args := []string{"-p", "--output-format", "stream-json"}
+	args := []string{"-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"}
 	args = appendCommonArgs(args, req)
 	args = append(args, req.Prompt)
 
@@ -107,6 +107,7 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 	}
 
 	var finalResult *cliResult
+	var textBuf strings.Builder
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
@@ -122,7 +123,28 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 		}
 
 		switch event.Type {
+		case "stream_event":
+			var inner apiStreamEvent
+			if json.Unmarshal(event.Event, &inner) != nil {
+				continue
+			}
+			switch inner.Type {
+			case "content_block_delta":
+				if inner.Delta.Type == "text_delta" && inner.Delta.Text != "" {
+					textBuf.WriteString(inner.Delta.Text)
+					flushCompleteLines(&textBuf, req.OnOutput)
+				}
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					flushRemaining(&textBuf, req.OnOutput)
+					req.OnOutput(formatToolUse(inner.ContentBlock.Name, inner.ContentBlock.Input))
+				}
+			case "content_block_stop":
+				flushRemaining(&textBuf, req.OnOutput)
+			}
+
 		case "assistant":
+			// Fallback for complete messages (when --include-partial-messages is absent).
 			for _, block := range event.Message.Content {
 				switch block.Type {
 				case "text":
@@ -135,6 +157,7 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 			}
 
 		case "result":
+			flushRemaining(&textBuf, req.OnOutput)
 			finalResult = &cliResult{
 				Type:         event.Type,
 				Subtype:      event.Subtype,
@@ -174,6 +197,36 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 		Text:    finalResult.Result,
 		CostUSD: finalResult.TotalCostUSD,
 	}, nil
+}
+
+// flushCompleteLines sends any complete lines (terminated by \n) from the
+// buffer to the callback, leaving the incomplete trailing fragment in buf.
+func flushCompleteLines(buf *strings.Builder, cb func(string)) {
+	text := buf.String()
+	for {
+		idx := strings.IndexByte(text, '\n')
+		if idx < 0 {
+			break
+		}
+		line := text[:idx]
+		if line != "" {
+			cb(line)
+		}
+		text = text[idx+1:]
+	}
+	buf.Reset()
+	buf.WriteString(text)
+}
+
+// flushRemaining sends any remaining text in the buffer as a final line.
+func flushRemaining(buf *strings.Builder, cb func(string)) {
+	if buf.Len() > 0 {
+		text := strings.TrimSpace(buf.String())
+		if text != "" {
+			cb(text)
+		}
+		buf.Reset()
+	}
 }
 
 func appendCommonArgs(args []string, req runtime.Request) []string {
