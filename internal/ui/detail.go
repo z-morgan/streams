@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/zmorgan/streams/internal/stream"
 )
 
 type detailView struct {
-	snapCursor int
+	snapCursor   int
+	contentWidth int // layout width captured on entry; 0 = not yet set
 }
 
 func (d *detailView) clampCursor(count int) {
@@ -46,18 +49,18 @@ func renderDetail(st *stream.Stream, snapCursor int, width, height int) string {
 		// Two-pane: left = snapshot list, right = selected snapshot details
 		leftWidth := 25
 		rightWidth := width - leftWidth - 3 // 3 for separator
-		if rightWidth < 40 {
-			rightWidth = 40
+		if rightWidth < 10 {
+			rightWidth = 10
 		}
 
 		left := renderSnapshotList(snaps, snapCursor, leftWidth)
 		right := renderSnapshotDetail(snaps, snapCursor, rightWidth)
 
-		b.WriteString(lipglossJoinHorizontal(left, right))
+		b.WriteString(joinPanes(left, right, leftWidth))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("j/k: snapshots  t: tail  s: start  x: stop  g: guidance  q/esc: back"))
+	b.WriteString(helpStyle.Render("j/k: snapshots  t: tail  a: attach  s: start  x: stop  g: guidance  q/esc: back"))
 
 	return b.String()
 }
@@ -151,16 +154,9 @@ func renderErrorBlock(err *stream.LoopError) string {
 	return errorBlockStyle.Render(msg)
 }
 
-func lipglossJoinHorizontal(left, right string) string {
+func joinPanes(left, right string, leftWidth int) string {
 	leftLines := strings.Split(left, "\n")
 	rightLines := strings.Split(right, "\n")
-
-	maxLeft := 0
-	for _, l := range leftLines {
-		if len(l) > maxLeft {
-			maxLeft = len(l)
-		}
-	}
 
 	maxLines := len(leftLines)
 	if len(rightLines) > maxLines {
@@ -177,21 +173,62 @@ func lipglossJoinHorizontal(left, right string) string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		b.WriteString(fmt.Sprintf("%-*s | %s\n", maxLeft, l, r))
+		// Pad left using visible width (ANSI-aware)
+		visWidth := lipgloss.Width(l)
+		pad := leftWidth - visWidth
+		if pad < 0 {
+			pad = 0
+		}
+		b.WriteString(l + strings.Repeat(" ", pad) + " │ " + r + "\n")
 	}
 	return b.String()
 }
 
-func wrapText(s string, width int) string {
-	if width <= 0 || len(s) <= width {
+// clipLines truncates each line to maxWidth visible characters so that
+// content rendered at a wider layout width doesn't wrap at the terminal edge.
+func clipLines(s string, maxWidth int) string {
+	if maxWidth <= 0 {
 		return s
 	}
-	var b strings.Builder
-	for len(s) > width {
-		b.WriteString(s[:width])
-		b.WriteString("\n")
-		s = s[width:]
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > maxWidth {
+			lines[i] = truncateAnsi(line, maxWidth)
+		}
 	}
-	b.WriteString(s)
-	return b.String()
+	return strings.Join(lines, "\n")
+}
+
+// truncateAnsi truncates a string that may contain ANSI escape sequences
+// to the given visible width.
+func truncateAnsi(s string, maxWidth int) string {
+	return ansi.Truncate(s, maxWidth, "")
+}
+
+func wrapText(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	var result []string
+	for _, line := range lines {
+		// Don't wrap table rows; clipLines will truncate at the terminal edge
+		if len(line) <= width || strings.HasPrefix(strings.TrimSpace(line), "|") {
+			result = append(result, line)
+			continue
+		}
+		// Wrap long prose lines at word boundaries
+		for len(line) > width {
+			breakAt := strings.LastIndex(line[:width], " ")
+			if breakAt <= 0 {
+				breakAt = width
+			}
+			result = append(result, line[:breakAt])
+			line = strings.TrimLeft(line[breakAt:], " ")
+		}
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return strings.Join(result, "\n")
 }

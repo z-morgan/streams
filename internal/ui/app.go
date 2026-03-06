@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -68,6 +69,11 @@ type streamCreatedMsg struct {
 
 // streamDeletedMsg is sent when orch.Delete finishes.
 type streamDeletedMsg struct {
+	err error
+}
+
+// claudeExitMsg is sent when an attached claude --resume session exits.
+type claudeExitMsg struct {
 	err error
 }
 
@@ -173,6 +179,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case claudeExitMsg:
+		if msg.err != nil {
+			m.errorMsg = "Attach session exited with error: " + msg.err.Error()
+		}
+		return m, nil
+
 	case streamDeletedMsg:
 		if msg.err != nil {
 			m.errorMsg = "Error deleting stream: " + msg.err.Error()
@@ -218,6 +230,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if st := m.selectedStream(); st != nil {
 			m.selectedID = st.ID
 			m.view = viewDetail
+			m.detail.contentWidth = m.width
 			m.detail.snapCursor = len(st.GetSnapshots()) - 1
 			if m.detail.snapCursor < 0 {
 				m.detail.snapCursor = 0
@@ -341,6 +354,24 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.view = viewTail
 		m.tail.scrollOffset = 0
 		return m, nil
+
+	case "a":
+		if st == nil {
+			return m, nil
+		}
+		status := st.GetStatus()
+		if status == stream.StatusRunning {
+			return m.setStatus("Stop the stream first.")
+		}
+		sessionID := st.GetSessionID()
+		if sessionID == "" {
+			return m.setStatus("No session ID yet — run the stream first.")
+		}
+		cmd := exec.Command("claude", "--resume", sessionID)
+		cmd.Dir = st.WorkTree
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return claudeExitMsg{err: err}
+		})
 	}
 
 	return m, nil
@@ -539,7 +570,12 @@ func (m Model) View() string {
 
 	case viewDetail:
 		st := m.orch.Get(m.selectedID)
-		return renderDetail(st, m.detail.snapCursor, m.width, m.height)
+		layoutWidth := m.detail.contentWidth
+		if layoutWidth == 0 {
+			layoutWidth = m.width
+		}
+		content := renderDetail(st, m.detail.snapCursor, layoutWidth, m.height)
+		return clipLines(content, m.width)
 
 	case viewTail:
 		st := m.orch.Get(m.selectedID)
