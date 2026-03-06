@@ -122,9 +122,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Clear persistent error on any keypress.
+	// Clear ephemeral messages on any keypress.
 	if _, ok := msg.(tea.KeyMsg); ok {
 		m.errorMsg = ""
+		m.statusMsg = ""
 	}
 
 	// Handle delete confirmation overlay if active.
@@ -333,7 +334,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		if st != nil {
 			if err := m.orch.Start(st.ID); err != nil {
-				return m.setStatus("Start error: " + err.Error())
+				m.statusMsg = "Start error: " + err.Error()
 			}
 		}
 
@@ -361,11 +362,13 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		status := st.GetStatus()
 		if status == stream.StatusRunning {
-			return m.setStatus("Stop the stream first.")
+			m.statusMsg = "Stop the stream first."
+			return m, nil
 		}
 		sessionID := st.GetSessionID()
 		if sessionID == "" {
-			return m.setStatus("No session ID yet — run the stream first.")
+			m.statusMsg = "No session ID yet — run the stream first."
+			return m, nil
 		}
 		cmd := exec.Command("claude", "--resume", sessionID)
 		cmd.Dir = st.WorkTree
@@ -575,6 +578,12 @@ func (m Model) View() string {
 			layoutWidth = m.width
 		}
 		content := renderDetail(st, m.detail.snapCursor, layoutWidth, m.height)
+		if m.errorMsg != "" {
+			content += "\n" + errorBlockStyle.Render(m.errorMsg)
+		}
+		if m.statusMsg != "" {
+			content += "\n" + helpStyle.Render(m.statusMsg)
+		}
 		return clipLines(content, m.width)
 
 	case viewTail:

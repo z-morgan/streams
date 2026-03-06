@@ -8,7 +8,9 @@ Use `bd` for all task tracking. Do not use TodoWrite, TaskCreate, or TaskList. S
 
 ## TUI Testing with tmux
 
-When you need to visually verify TUI changes, use tmux to run the app in a background session:
+**REQUIRED**: After implementing any UI changes, you MUST verify them using tmux before committing. Do not skip this step — compilation alone is not sufficient.
+
+Use tmux to run the app in a background session:
 
 ```bash
 # cd to the plentish app directory to test against it
