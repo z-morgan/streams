@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -56,7 +57,8 @@ type Orchestrator struct {
 	mu      sync.RWMutex
 	streams map[string]*stream.Stream
 	cancels map[string]context.CancelFunc
-	snaps   map[string]int // persisted snapshot count per stream
+	done    map[string]chan struct{} // closed when loop goroutine exits
+	snaps   map[string]int          // persisted snapshot count per stream
 	store   *store.Store
 	sink    EventSink
 	config  Config
@@ -66,6 +68,7 @@ func New(s *store.Store, config Config) *Orchestrator {
 	return &Orchestrator{
 		streams: make(map[string]*stream.Stream),
 		cancels: make(map[string]context.CancelFunc),
+		done:    make(map[string]chan struct{}),
 		snaps:   make(map[string]int),
 		store:   s,
 		config:  config,
@@ -160,6 +163,7 @@ func (o *Orchestrator) Create(task string) (*stream.Stream, error) {
 		BaseSHA:       baseSHA,
 		Branch:        branch,
 		WorkTree:      worktreePath,
+		SessionID:     newUUID(),
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
@@ -212,6 +216,8 @@ func (o *Orchestrator) Start(id string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancels[id] = cancel
+	doneCh := make(chan struct{})
+	o.done[id] = doneCh
 	o.mu.Unlock()
 
 	// Clear any previous error on resume.
@@ -232,6 +238,8 @@ func (o *Orchestrator) Start(id string) error {
 	o.emit(Event{StreamID: id, Kind: EventStarted})
 
 	go func() {
+		defer close(doneCh)
+
 		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, loop.NewPhase, func(s *stream.Stream) {
 			o.checkpoint(s)
 			o.emit(Event{StreamID: s.ID, Kind: EventCheckpoint})
@@ -252,6 +260,7 @@ func (o *Orchestrator) Start(id string) error {
 
 		o.mu.Lock()
 		delete(o.cancels, id)
+		delete(o.done, id)
 		o.mu.Unlock()
 	}()
 
@@ -266,6 +275,21 @@ func (o *Orchestrator) Stop(id string) {
 	if ok {
 		cancel()
 	}
+}
+
+// Interrupt cancels a running stream's loop and blocks until the goroutine
+// exits. Returns an error if the stream is not running.
+func (o *Orchestrator) Interrupt(id string) error {
+	o.mu.Lock()
+	cancel, ok := o.cancels[id]
+	doneCh := o.done[id]
+	o.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("stream %q is not running", id)
+	}
+	cancel()
+	<-doneCh
+	return nil
 }
 
 // Delete removes a stream's worktree and disk data. If cleanup is true, the
@@ -416,6 +440,15 @@ func gitHead(workDir string) (string, error) {
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// newUUID generates a random UUID v4 string without external dependencies.
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func createWorktree(repoDir, worktreePath, branch string) error {

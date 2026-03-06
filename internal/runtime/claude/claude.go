@@ -232,6 +232,9 @@ func flushRemaining(buf *strings.Builder, cb func(string)) {
 }
 
 func appendCommonArgs(args []string, req runtime.Request) []string {
+	if req.SessionID != "" {
+		args = append(args, "--session-id", req.SessionID)
+	}
 	if v, ok := req.Options["allowedTools"]; ok {
 		args = append(args, "--allowedTools", v)
 	}

@@ -84,6 +84,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 
 		implReq := buildRequest(implPrompt, phase.ImplementTools())
+		implReq.SessionID = s.GetSessionID()
 		implReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		implResp, err := rt.Run(ctx, implReq)
 		if err != nil {
