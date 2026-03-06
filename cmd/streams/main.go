@@ -77,6 +77,11 @@ func run() int {
 }
 
 func runTUI(orch *orchestrator.Orchestrator, storeRoot string) int {
+	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
+		slog.Error("failed to create data directory", "path", storeRoot, "err", err)
+		return 1
+	}
+
 	logPath := filepath.Join(storeRoot, "streams.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
