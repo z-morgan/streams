@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -42,6 +43,10 @@ type Model struct {
 	newStreamInput textinput.Model
 	creating       bool // true while orch.Create is running
 
+	// Delete confirmation overlay state.
+	showDeleteConfirm bool
+	deleteTargetID    string
+
 	// Beads init prompt state.
 	showBeadsInit bool
 	pendingTask   string // task stashed while waiting for stealth answer
@@ -57,6 +62,11 @@ type Model struct {
 type streamCreatedMsg struct {
 	stream *stream.Stream
 	err    error
+}
+
+// streamDeletedMsg is sent when orch.Delete finishes.
+type streamDeletedMsg struct {
+	err error
 }
 
 // beadsInitDoneMsg is sent when bd init finishes.
@@ -109,6 +119,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorMsg = ""
 	}
 
+	// Handle delete confirmation overlay if active.
+	if m.showDeleteConfirm {
+		return m.updateDeleteConfirm(msg)
+	}
+
 	// Handle beads init prompt if active.
 	if m.showBeadsInit {
 		return m.updateBeadsInit(msg)
@@ -152,6 +167,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = "Error creating stream: " + msg.err.Error()
 			return m, nil
 		}
+		return m, nil
+
+	case streamDeletedMsg:
+		if msg.err != nil {
+			m.errorMsg = "Error deleting stream: " + msg.err.Error()
+			return m, nil
+		}
+		streams := m.orch.List()
+		m.dashboard.clampCursor(len(streams))
 		return m, nil
 
 	case clearStatusMsg:
@@ -226,6 +250,17 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textarea.Blink
 		}
 		return m.setStatus("No stream selected.")
+
+	case "d":
+		if st := m.selectedStream(); st != nil {
+			if m.orch.IsRunning(st.ID) {
+				return m.setStatus("Stop the stream first.")
+			}
+			m.deleteTargetID = st.ID
+			m.showDeleteConfirm = true
+		} else {
+			return m.setStatus("No stream selected.")
+		}
 
 	}
 
@@ -360,7 +395,35 @@ func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y":
+			m.showDeleteConfirm = false
+			id := m.deleteTargetID
+			orch := m.orch
+			return m, func() tea.Msg {
+				return streamDeletedMsg{err: orch.Delete(id)}
+			}
+		case "n", "esc":
+			m.showDeleteConfirm = false
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m Model) View() string {
+	if m.showDeleteConfirm {
+		st := m.orch.Get(m.deleteTargetID)
+		name := m.deleteTargetID
+		if st != nil {
+			name = st.Name
+		}
+		return renderDeleteConfirmOverlay(name, m.width, m.height)
+	}
+
 	if m.showBeadsInit {
 		return renderBeadsInitOverlay(m.width, m.height)
 	}
@@ -437,6 +500,23 @@ func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
 	overlay := titleStyle.Render("Guidance") + "\n\n"
 	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("ctrl+s: send  esc: cancel")
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderDeleteConfirmOverlay(name string, width, height int) string {
+	overlay := titleStyle.Render("Delete Stream") + "\n\n"
+	overlay += fmt.Sprintf("Delete %q?\n\n", name)
+	overlay += "The git branch and beads issue will remain\n"
+	overlay += "intact for manual cleanup.\n\n"
+	overlay += helpStyle.Render("y: delete  n/esc: cancel")
 
 	maxWidth := width - 6
 	if maxWidth < 40 {

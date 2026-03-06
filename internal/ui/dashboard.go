@@ -68,7 +68,7 @@ func renderDashboard(streams []*stream.Stream, cursor int) string {
 	return b.String()
 }
 
-const dashboardHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  g: guidance  q: quit"
+const dashboardHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  q: quit"
 
 func statusIndicator(st *stream.Stream) string {
 	status := st.GetStatus()

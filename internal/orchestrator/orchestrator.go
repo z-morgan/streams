@@ -268,6 +268,38 @@ func (o *Orchestrator) Stop(id string) {
 	}
 }
 
+// Delete removes a stream's worktree and disk data. Returns an error if the
+// stream is currently running.
+func (o *Orchestrator) Delete(id string) error {
+	o.mu.Lock()
+	st := o.streams[id]
+	if st == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q not found", id)
+	}
+	if _, running := o.cancels[id]; running {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q is still running — stop it first", id)
+	}
+	delete(o.streams, id)
+	delete(o.snaps, id)
+	worktree := st.WorkTree
+	o.mu.Unlock()
+
+	// Remove git worktree.
+	cmd := exec.Command("git", "worktree", "remove", worktree, "--force")
+	cmd.Dir = o.config.RepoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("git worktree remove failed", "path", worktree, "err", err, "output", strings.TrimSpace(string(out)))
+	}
+
+	if err := o.store.Delete(id); err != nil {
+		return fmt.Errorf("delete store data: %w", err)
+	}
+
+	return nil
+}
+
 // SendGuidance queues a guidance message for a stream.
 func (o *Orchestrator) SendGuidance(id string, text string) error {
 	st := o.Get(id)

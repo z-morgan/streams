@@ -51,6 +51,15 @@ type errData struct {
 	Detail  string `json:"detail"`
 }
 
+// Delete removes the stream directory from disk.
+func (s *Store) Delete(id string) error {
+	dir := streamDir(s.Root, id)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove %s: %w", dir, err)
+	}
+	return nil
+}
+
 func streamDir(root, id string) string {
 	return filepath.Join(root, "streams", id)
 }
