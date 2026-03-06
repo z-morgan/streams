@@ -37,12 +37,6 @@ func renderDetail(st *stream.Stream, snapCursor int, width, height int) string {
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
-	// Error block
-	if st.LastError != nil {
-		b.WriteString(renderErrorBlock(st.LastError))
-		b.WriteString("\n\n")
-	}
-
 	snaps := st.Snapshots
 
 	if len(snaps) == 0 {

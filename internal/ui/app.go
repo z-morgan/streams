@@ -379,17 +379,18 @@ func (m Model) View() string {
 	case viewDashboard:
 		streams := m.orch.List()
 		m.dashboard.clampCursor(len(streams))
-		content := renderDashboard(streams, m.dashboard.cursor, m.width, m.height)
+		body := renderDashboard(streams, m.dashboard.cursor)
 		if m.creating {
-			content += "\n\n" + helpStyle.Render("Creating stream...")
+			body += "\n" + helpStyle.Render("Creating stream...")
 		}
 		if m.errorMsg != "" {
-			content += "\n\n" + errorBlockStyle.Render(m.errorMsg)
+			body += "\n" + errorBlockStyle.Render(m.errorMsg)
 		}
 		if m.statusMsg != "" {
-			content += "\n\n" + helpStyle.Render(m.statusMsg)
+			body += "\n" + helpStyle.Render(m.statusMsg)
 		}
-		return content
+		footer := helpStyle.Render(dashboardHelp)
+		return layoutWithFooter(body, footer, m.height)
 
 	case viewDetail:
 		st := m.orch.Get(m.selectedID)

@@ -25,7 +25,7 @@ func (d *dashboardView) clampCursor(count int) {
 	}
 }
 
-func renderDashboard(streams []*stream.Stream, cursor int, width, height int) string {
+func renderDashboard(streams []*stream.Stream, cursor int) string {
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render("Streams"))
@@ -65,11 +65,10 @@ func renderDashboard(streams []*stream.Stream, cursor int, width, height int) st
 		}
 	}
 
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("j/k: navigate  enter: inspect  n: new  s: start  x: stop  g: guidance  q: quit"))
-
 	return b.String()
 }
+
+const dashboardHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  g: guidance  q: quit"
 
 func statusIndicator(st *stream.Stream) string {
 	status := st.GetStatus()
@@ -99,4 +98,22 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// layoutWithFooter places body at the top and footer at the bottom of the
+// terminal, filling the gap between them with blank lines. This ensures the
+// footer (help text) is always visible regardless of body length.
+func layoutWithFooter(body, footer string, height int) string {
+	if height <= 0 {
+		return body + "\n" + footer
+	}
+
+	bodyLines := strings.Count(body, "\n") + 1
+	footerLines := strings.Count(footer, "\n") + 1
+	gap := height - bodyLines - footerLines
+	if gap < 1 {
+		gap = 1
+	}
+
+	return body + strings.Repeat("\n", gap) + footer
 }

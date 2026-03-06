@@ -28,8 +28,8 @@ func TestDecomposePhase_ImplementPromptFirstIteration(t *testing.T) {
 	if !strings.Contains(prompt, "parent-1") {
 		t.Error("expected prompt to reference parent ID")
 	}
-	if !strings.Contains(prompt, `metadata '{"sequence":N}'`) {
-		t.Error("expected prompt to include metadata sequence instructions")
+	if !strings.Contains(prompt, `--notes "sequence:N"`) {
+		t.Error("expected prompt to include notes sequence instructions")
 	}
 }
 
@@ -62,8 +62,8 @@ func TestDecomposePhase_ReviewPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "parent-1") {
 		t.Error("expected review prompt to reference parent ID")
 	}
-	if !strings.Contains(prompt, "metadata.sequence") {
-		t.Error("expected review prompt to mention metadata.sequence")
+	if !strings.Contains(prompt, "notes sequence") {
+		t.Error("expected review prompt to mention notes sequence")
 	}
 }
 

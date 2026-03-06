@@ -73,10 +73,21 @@ func run() int {
 		return runHeadless(orch, workDir, *task, *maxIterations, *maxBudget)
 	}
 
-	return runTUI(orch)
+	return runTUI(orch, storeRoot)
 }
 
-func runTUI(orch *orchestrator.Orchestrator) int {
+func runTUI(orch *orchestrator.Orchestrator, storeRoot string) int {
+	logPath := filepath.Join(storeRoot, "streams.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		slog.Error("failed to open log file", "path", logPath, "err", err)
+		return 1
+	}
+	defer logFile.Close()
+
+	logger := slog.New(slog.NewTextHandler(logFile, nil))
+	slog.SetDefault(logger)
+
 	p := tea.NewProgram(ui.New(orch), tea.WithAltScreen())
 	orch.SetSink(&ui.EventSink{Program: p})
 
