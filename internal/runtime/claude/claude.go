@@ -77,8 +77,9 @@ func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Re
 	}
 
 	return &runtime.Response{
-		Text:    result.Result,
-		CostUSD: result.TotalCostUSD,
+		Text:      result.Result,
+		CostUSD:   result.TotalCostUSD,
+		SessionID: result.SessionID,
 	}, nil
 }
 
@@ -194,8 +195,9 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 	}
 
 	return &runtime.Response{
-		Text:    finalResult.Result,
-		CostUSD: finalResult.TotalCostUSD,
+		Text:      finalResult.Result,
+		CostUSD:   finalResult.TotalCostUSD,
+		SessionID: finalResult.SessionID,
 	}, nil
 }
 

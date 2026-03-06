@@ -71,6 +71,9 @@ func TestRunSuccess(t *testing.T) {
 	if resp.CostUSD != 0.05 {
 		t.Errorf("got cost %v, want 0.05", resp.CostUSD)
 	}
+	if resp.SessionID != "abc-123" {
+		t.Errorf("got session_id %q, want %q", resp.SessionID, "abc-123")
+	}
 }
 
 func TestRunBudgetExceeded(t *testing.T) {
@@ -178,6 +181,9 @@ func TestRunStreamingTextDeltas(t *testing.T) {
 	if resp.Text != "Hello world\nSecond line" {
 		t.Errorf("got text %q, want %q", resp.Text, "Hello world\nSecond line")
 	}
+	if resp.SessionID != "s-1" {
+		t.Errorf("got session_id %q, want %q", resp.SessionID, "s-1")
+	}
 	if len(lines) != 2 {
 		t.Fatalf("got %d output lines, want 2: %v", len(lines), lines)
 	}
@@ -208,6 +214,9 @@ func TestRunStreamingToolUse(t *testing.T) {
 	}
 	if resp.Text != "done" {
 		t.Errorf("got text %q, want %q", resp.Text, "done")
+	}
+	if resp.SessionID != "s-2" {
+		t.Errorf("got session_id %q, want %q", resp.SessionID, "s-2")
 	}
 	if len(lines) != 1 {
 		t.Fatalf("got %d output lines, want 1: %v", len(lines), lines)

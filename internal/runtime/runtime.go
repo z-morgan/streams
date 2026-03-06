@@ -11,12 +11,14 @@ type Request struct {
 
 // Response holds the result of a single runtime invocation.
 type Response struct {
-	Text    string
-	CostUSD float64
+	Text      string
+	CostUSD   float64
+	SessionID string
 }
 
 // Runtime is the interface for executing prompts. Each invocation starts a fresh
-// session — no session ID tracking. Context cancellation handles interruption.
+// session. The returned Response includes the session ID for resume support.
+// Context cancellation handles interruption.
 type Runtime interface {
 	Run(ctx context.Context, req Request) (*Response, error)
 }
