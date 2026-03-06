@@ -57,6 +57,7 @@ type Model struct {
 	// Attach state.
 	interrupting        bool // true while waiting for Interrupt to finish
 	attachedFromRunning bool // true if attach was triggered from a running stream
+	showRestartPrompt   bool // true after returning from an auto-paused attach
 
 	// Ephemeral status message shown at bottom of dashboard.
 	statusMsg string
@@ -120,6 +121,13 @@ func (s *EventSink) Send(event orchestrator.Event) {
 }
 
 func (m Model) Init() tea.Cmd {
+	// Auto-resume streams that were running or created when the app last exited.
+	for _, st := range m.orch.List() {
+		status := st.GetStatus()
+		if status == stream.StatusCreated || status == stream.StatusRunning {
+			_ = m.orch.Start(st.ID)
+		}
+	}
 	return tea.WindowSize()
 }
 
@@ -136,6 +144,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyMsg); ok {
 		m.errorMsg = ""
 		m.statusMsg = ""
+	}
+
+	// Handle restart prompt overlay if active.
+	if m.showRestartPrompt {
+		return m.updateRestartPrompt(msg)
 	}
 
 	// Handle delete confirmation overlay if active.
@@ -188,6 +201,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = "Error creating stream: " + msg.err.Error()
 			return m, nil
 		}
+		if err := m.orch.Start(msg.stream.ID); err != nil {
+			m.errorMsg = "Stream created but failed to start: " + err.Error()
+		}
 		return m, nil
 
 	case interruptDoneMsg:
@@ -209,6 +225,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case claudeExitMsg:
 		if msg.err != nil {
 			m.errorMsg = "Attach session exited with error: " + msg.err.Error()
+		}
+		if m.attachedFromRunning {
+			m.showRestartPrompt = true
+			m.attachedFromRunning = false
 		}
 		return m, nil
 
@@ -529,6 +549,26 @@ func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateRestartPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y":
+			m.showRestartPrompt = false
+			if m.selectedID != "" {
+				if err := m.orch.Start(m.selectedID); err != nil {
+					m.errorMsg = "Restart error: " + err.Error()
+				}
+			}
+			return m, nil
+		case "n", "esc":
+			m.showRestartPrompt = false
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -556,6 +596,10 @@ func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.showRestartPrompt {
+		return renderRestartPromptOverlay(m.width, m.height)
+	}
+
 	if m.showDeleteConfirm {
 		st := m.orch.Get(m.deleteTargetID)
 		name := m.deleteTargetID
@@ -666,6 +710,22 @@ func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
 	overlay := titleStyle.Render("Guidance") + "\n\n"
 	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("ctrl+s: send  esc: cancel")
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderRestartPromptOverlay(width, height int) string {
+	overlay := titleStyle.Render("Restart Stream?") + "\n\n"
+	overlay += "The stream was paused for attach.\n"
+	overlay += "Would you like to restart it?\n\n"
+	overlay += helpStyle.Render("y: restart  n: keep paused")
 
 	maxWidth := width - 6
 	if maxWidth < 40 {

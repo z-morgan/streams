@@ -278,7 +278,8 @@ func (o *Orchestrator) Stop(id string) {
 }
 
 // Interrupt cancels a running stream's loop and blocks until the goroutine
-// exits. Returns an error if the stream is not running.
+// exits or a 10-second timeout is reached. Returns an error if the stream is
+// not running or if the timeout expires.
 func (o *Orchestrator) Interrupt(id string) error {
 	o.mu.Lock()
 	cancel, ok := o.cancels[id]
@@ -288,8 +289,12 @@ func (o *Orchestrator) Interrupt(id string) error {
 		return fmt.Errorf("stream %q is not running", id)
 	}
 	cancel()
-	<-doneCh
-	return nil
+	select {
+	case <-doneCh:
+		return nil
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("timeout waiting for stream %q to stop", id)
+	}
 }
 
 // Delete removes a stream's worktree and disk data. If cleanup is true, the
