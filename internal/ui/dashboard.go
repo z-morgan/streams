@@ -104,6 +104,9 @@ func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
 	}
 
 	if termWidth < minCol {
+		if termWidth < 1 {
+			return 1, 1
+		}
 		return termWidth, 1
 	}
 
@@ -126,6 +129,9 @@ func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
 // renderChannel renders a single stream as a vertical column.
 func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) string {
 	innerWidth := colWidth - 4 // border + padding takes ~4 chars
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
 
 	// Header: name + status/phase
 	name := truncate(st.Name, innerWidth)
@@ -267,8 +273,14 @@ func currentPhase(st *stream.Stream) string {
 }
 
 func truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
+	}
+	if max == 1 {
+		return "…"
 	}
 	return s[:max-1] + "…"
 }
