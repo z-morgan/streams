@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -312,24 +313,25 @@ func (o *Orchestrator) emit(e Event) {
 }
 
 func createBeadsParent(task, workDir string) (string, error) {
-	cmd := exec.Command("bd", "create", "--title", task, "--type", "task", "--priority", "2")
+	cmd := exec.Command("bd", "create", "--title", task, "--type", "task", "--priority", "2", "--json")
 	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("bd create: %s", strings.TrimSpace(string(out)))
-	}
-	return parseBeadsID(strings.TrimSpace(string(out))), nil
-}
-
-func parseBeadsID(output string) string {
-	fields := strings.Fields(output)
-	for _, f := range fields {
-		f = strings.TrimSuffix(f, ":")
-		if strings.Contains(f, "-") && !strings.HasPrefix(f, "✓") && !strings.EqualFold(f, "Created") {
-			return f
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("bd create: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
+		return "", fmt.Errorf("bd create: %w", err)
 	}
-	return strings.TrimSpace(output)
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", fmt.Errorf("parse bd create output: %w", err)
+	}
+	if result.ID == "" {
+		return "", fmt.Errorf("bd create returned empty ID")
+	}
+	return result.ID, nil
 }
 
 func gitHead(workDir string) (string, error) {
