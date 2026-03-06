@@ -178,12 +178,42 @@ func (s *Stream) GetPipeline() []string {
 	return p
 }
 
+func (s *Stream) GetSnapshots() []Snapshot {
+	s.mu.RLock()
+	snaps := make([]Snapshot, len(s.Snapshots))
+	copy(snaps, s.Snapshots)
+	s.mu.RUnlock()
+	return snaps
+}
+
+func (s *Stream) GetLastError() *LoopError {
+	s.mu.RLock()
+	e := s.LastError
+	s.mu.RUnlock()
+	return e
+}
+
+func (s *Stream) GetGuidanceCount() int {
+	s.mu.RLock()
+	n := len(s.Guidance)
+	s.mu.RUnlock()
+	return n
+}
+
 // AddGuidance appends a guidance item to the stream under the mutex.
 func (s *Stream) AddGuidance(g Guidance) {
 	s.mu.Lock()
 	s.Guidance = append(s.Guidance, g)
 	s.UpdatedAt = time.Now()
 	s.mu.Unlock()
+}
+
+func (s *Stream) GetGuidance() []Guidance {
+	s.mu.RLock()
+	g := make([]Guidance, len(s.Guidance))
+	copy(g, s.Guidance)
+	s.mu.RUnlock()
+	return g
 }
 
 // DrainGuidance atomically moves all queued guidance items out of the stream

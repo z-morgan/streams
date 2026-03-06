@@ -150,6 +150,16 @@ func TestEventSink(t *testing.T) {
 	}
 }
 
+func TestValidatePipeline(t *testing.T) {
+	if err := ValidatePipeline([]string{"plan", "decompose", "coding"}); err != nil {
+		t.Fatalf("expected valid pipeline: %v", err)
+	}
+
+	if err := ValidatePipeline([]string{"coding", "bogus"}); err == nil {
+		t.Fatal("expected error for invalid pipeline phase")
+	}
+}
+
 func TestEmitWithNilSink(t *testing.T) {
 	root := t.TempDir()
 	o := New(&store.Store{Root: root}, Config{})

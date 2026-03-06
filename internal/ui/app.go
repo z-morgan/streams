@@ -186,7 +186,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if st := m.selectedStream(); st != nil {
 			m.selectedID = st.ID
 			m.view = viewDetail
-			m.detail.snapCursor = len(st.Snapshots) - 1
+			m.detail.snapCursor = len(st.GetSnapshots()) - 1
 			if m.detail.snapCursor < 0 {
 				m.detail.snapCursor = 0
 			}
@@ -234,9 +234,11 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(m.selectedID)
+	snapCount := 0
 	if st != nil {
-		m.detail.clampCursor(len(st.Snapshots))
+		snapCount = len(st.GetSnapshots())
 	}
+	m.detail.clampCursor(snapCount)
 
 	switch msg.String() {
 	case "esc", "q":
@@ -245,15 +247,11 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "j", "down":
 		m.detail.snapCursor++
-		if st != nil {
-			m.detail.clampCursor(len(st.Snapshots))
-		}
+		m.detail.clampCursor(snapCount)
 
 	case "k", "up":
 		m.detail.snapCursor--
-		if st != nil {
-			m.detail.clampCursor(len(st.Snapshots))
-		}
+		m.detail.clampCursor(snapCount)
 
 	case "s":
 		if st != nil {

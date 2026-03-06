@@ -144,6 +144,10 @@ func (o *Orchestrator) Create(task string) (*stream.Stream, error) {
 		pipeline = []string{"coding"}
 	}
 
+	if err := ValidatePipeline(pipeline); err != nil {
+		return nil, err
+	}
+
 	st := &stream.Stream{
 		ID:            streamID,
 		Name:          task,
@@ -310,6 +314,15 @@ func (o *Orchestrator) emit(e Event) {
 	if sink != nil {
 		go sink.Send(e)
 	}
+}
+
+func ValidatePipeline(phases []string) error {
+	for _, name := range phases {
+		if _, err := loop.NewPhase(name); err != nil {
+			return fmt.Errorf("invalid pipeline phase %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func createBeadsParent(task, workDir string) (string, error) {

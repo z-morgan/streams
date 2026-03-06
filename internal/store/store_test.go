@@ -200,6 +200,52 @@ func TestLoadAllEmpty(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadWithGuidance(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	ts1 := time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2025, 6, 1, 11, 0, 0, 0, time.UTC)
+
+	st := &stream.Stream{
+		ID:        "test-guidance",
+		Name:      "Guidance test",
+		Task:      "test",
+		Pipeline:  []string{"coding"},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	st.AddGuidance(stream.Guidance{Text: "focus on error handling", Timestamp: ts1})
+	st.AddGuidance(stream.Guidance{Text: "skip the CLI tests", Timestamp: ts2})
+
+	_, err := s.Save(st, 0)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := s.Load("test-guidance")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	guidance := loaded.GetGuidance()
+	if len(guidance) != 2 {
+		t.Fatalf("Guidance: got %d, want 2", len(guidance))
+	}
+	if guidance[0].Text != "focus on error handling" {
+		t.Errorf("Guidance[0].Text: got %q, want %q", guidance[0].Text, "focus on error handling")
+	}
+	if !guidance[0].Timestamp.Equal(ts1) {
+		t.Errorf("Guidance[0].Timestamp: got %v, want %v", guidance[0].Timestamp, ts1)
+	}
+	if guidance[1].Text != "skip the CLI tests" {
+		t.Errorf("Guidance[1].Text: got %q, want %q", guidance[1].Text, "skip the CLI tests")
+	}
+	if !guidance[1].Timestamp.Equal(ts2) {
+		t.Errorf("Guidance[1].Timestamp: got %v, want %v", guidance[1].Timestamp, ts2)
+	}
+}
+
 func TestLoadAllIgnoresFiles(t *testing.T) {
 	root := t.TempDir()
 	s := &Store{Root: root}

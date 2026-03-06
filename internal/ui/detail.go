@@ -33,11 +33,11 @@ func renderDetail(st *stream.Stream, snapCursor int, width, height int) string {
 
 	// Header
 	header := fmt.Sprintf("%s  [%s]  %s  iter %d",
-		st.Name, st.GetStatus(), currentPhase(st), st.Iteration)
+		st.Name, st.GetStatus(), currentPhase(st), st.GetIteration())
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
-	snaps := st.Snapshots
+	snaps := st.GetSnapshots()
 
 	if len(snaps) == 0 {
 		b.WriteString(helpStyle.Render("No snapshots yet."))

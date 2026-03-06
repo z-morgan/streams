@@ -45,8 +45,8 @@ func renderDashboard(streams []*stream.Stream, cursor int) string {
 
 			status := statusIndicator(st)
 			phase := currentPhase(st)
-			iter := fmt.Sprintf("iter %d", st.Iteration)
-			guidanceCount := len(st.Guidance)
+			iter := fmt.Sprintf("iter %d", st.GetIteration())
+			guidanceCount := st.GetGuidanceCount()
 
 			row := fmt.Sprintf("%s%-20s %s  %-10s  %s",
 				prefix,
@@ -79,7 +79,7 @@ func statusIndicator(st *stream.Stream) string {
 	}
 	style := lipgloss.NewStyle().Foreground(color)
 
-	if status == stream.StatusPaused && st.LastError != nil {
+	if status == stream.StatusPaused && st.GetLastError() != nil {
 		return lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("! Error")
 	}
 
@@ -87,8 +87,10 @@ func statusIndicator(st *stream.Stream) string {
 }
 
 func currentPhase(st *stream.Stream) string {
-	if st.PipelineIndex < len(st.Pipeline) {
-		return st.Pipeline[st.PipelineIndex]
+	idx := st.GetPipelineIndex()
+	pipeline := st.GetPipeline()
+	if idx < len(pipeline) {
+		return pipeline[idx]
 	}
 	return "done"
 }

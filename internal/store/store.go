@@ -33,9 +33,15 @@ type streamData struct {
 	BaseSHA       string    `json:"base_sha"`
 	Branch        string    `json:"branch"`
 	WorkTree      string    `json:"worktree"`
-	LastError     *errData  `json:"last_error,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	LastError     *errData        `json:"last_error,omitempty"`
+	Guidance      []guidanceData `json:"guidance,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+}
+
+type guidanceData struct {
+	Text      string    `json:"text"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type errData struct {
@@ -187,6 +193,13 @@ func toStreamData(st *stream.Stream) streamData {
 			Detail:  st.LastError.Detail,
 		}
 	}
+	guidance := st.GetGuidance()
+	if len(guidance) > 0 {
+		d.Guidance = make([]guidanceData, len(guidance))
+		for i, g := range guidance {
+			d.Guidance[i] = guidanceData{Text: g.Text, Timestamp: g.Timestamp}
+		}
+	}
 	return d
 }
 
@@ -216,6 +229,12 @@ func fromStreamData(d streamData) *stream.Stream {
 			Step:    parseIterStep(d.LastError.Step),
 			Message: d.LastError.Message,
 			Detail:  d.LastError.Detail,
+		}
+	}
+	if len(d.Guidance) > 0 {
+		st.Guidance = make([]stream.Guidance, len(d.Guidance))
+		for i, g := range d.Guidance {
+			st.Guidance[i] = stream.Guidance{Text: g.Text, Timestamp: g.Timestamp}
 		}
 	}
 	return st
