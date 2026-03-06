@@ -33,6 +33,7 @@ type streamData struct {
 	BaseSHA       string    `json:"base_sha"`
 	Branch        string    `json:"branch"`
 	WorkTree      string    `json:"worktree"`
+	SessionID     string          `json:"session_id,omitempty"`
 	LastError     *errData        `json:"last_error,omitempty"`
 	Guidance      []guidanceData `json:"guidance,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
@@ -188,6 +189,7 @@ func toStreamData(st *stream.Stream) streamData {
 		Iteration:     st.GetIteration(),
 		Converged:     st.Converged,
 		BeadsParentID: st.BeadsParentID,
+		SessionID:     st.GetSessionID(),
 		BaseSHA:       st.BaseSHA,
 		Branch:        st.Branch,
 		WorkTree:      st.WorkTree,
@@ -223,6 +225,7 @@ func fromStreamData(d streamData) *stream.Stream {
 		IterStep:      parseIterStep(d.IterStep),
 		Converged:     d.Converged,
 		BeadsParentID: d.BeadsParentID,
+		SessionID:     d.SessionID,
 		BaseSHA:       d.BaseSHA,
 		Branch:        d.Branch,
 		WorkTree:      d.WorkTree,
