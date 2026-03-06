@@ -54,6 +54,10 @@ type Model struct {
 	showBeadsInit bool
 	pendingTask   string // task stashed while waiting for stealth answer
 
+	// Attach state.
+	interrupting        bool // true while waiting for Interrupt to finish
+	attachedFromRunning bool // true if attach was triggered from a running stream
+
 	// Ephemeral status message shown at bottom of dashboard.
 	statusMsg string
 
@@ -75,6 +79,12 @@ type streamDeletedMsg struct {
 // claudeExitMsg is sent when an attached claude --resume session exits.
 type claudeExitMsg struct {
 	err error
+}
+
+// interruptDoneMsg is sent when orch.Interrupt finishes (loop goroutine exited).
+type interruptDoneMsg struct {
+	sessionID string
+	err       error
 }
 
 // beadsInitDoneMsg is sent when bd init finishes.
@@ -179,6 +189,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
+
+	case interruptDoneMsg:
+		m.interrupting = false
+		if msg.err != nil {
+			m.errorMsg = "Interrupt failed: " + msg.err.Error()
+			return m, nil
+		}
+		st := m.orch.Get(m.selectedID)
+		if st == nil {
+			return m, nil
+		}
+		c := exec.Command("claude", "--resume", msg.sessionID)
+		c.Dir = st.WorkTree
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			return claudeExitMsg{err: err}
+		})
 
 	case claudeExitMsg:
 		if msg.err != nil {
@@ -357,12 +383,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "a":
-		if st == nil {
-			return m, nil
-		}
-		status := st.GetStatus()
-		if status == stream.StatusRunning {
-			m.statusMsg = "Stop the stream first."
+		if st == nil || m.interrupting {
 			return m, nil
 		}
 		sessionID := st.GetSessionID()
@@ -370,9 +391,21 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "No session ID yet — run the stream first."
 			return m, nil
 		}
-		cmd := exec.Command("claude", "--resume", sessionID)
-		cmd.Dir = st.WorkTree
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if st.GetStatus() == stream.StatusRunning {
+			m.interrupting = true
+			m.attachedFromRunning = true
+			m.statusMsg = "Pausing..."
+			id := st.ID
+			orch := m.orch
+			return m, func() tea.Msg {
+				err := orch.Interrupt(id)
+				return interruptDoneMsg{sessionID: sessionID, err: err}
+			}
+		}
+		m.attachedFromRunning = false
+		c := exec.Command("claude", "--resume", sessionID)
+		c.Dir = st.WorkTree
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return claudeExitMsg{err: err}
 		})
 	}
