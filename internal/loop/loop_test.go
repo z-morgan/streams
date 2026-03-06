@@ -285,6 +285,23 @@ func TestRunPauseTransitionDoesNotAdvance(t *testing.T) {
 	}
 }
 
+func TestRunStoresSessionID(t *testing.T) {
+	s := newTestStream()
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "implemented", SessionID: "sess-abc"}},
+			{resp: &runtime.Response{Text: "no issues"}},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+
+	if s.GetSessionID() != "sess-abc" {
+		t.Errorf("got session_id %q, want %q", s.GetSessionID(), "sess-abc")
+	}
+}
+
 func TestRunRuntimeError(t *testing.T) {
 	s := newTestStream()
 	rt := &mockRuntime{

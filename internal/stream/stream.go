@@ -96,6 +96,7 @@ type Stream struct {
 	BaseSHA       string // commit the stream branched from; rebase target
 	Branch        string // e.g. "streams/<stream-id>"
 	WorkTree      string // absolute path to git worktree
+	SessionID     string // most recent Claude session ID; used for --resume attach
 	LastError     *LoopError
 	Snapshots     []Snapshot
 	Guidance      []Guidance
@@ -151,6 +152,19 @@ func (s *Stream) SetConverged(v bool) {
 	s.Converged = v
 	s.UpdatedAt = time.Now()
 	s.mu.Unlock()
+}
+
+func (s *Stream) SetSessionID(id string) {
+	s.mu.Lock()
+	s.SessionID = id
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetSessionID() string {
+	s.mu.RLock()
+	id := s.SessionID
+	s.mu.RUnlock()
+	return id
 }
 
 func (s *Stream) SetLastError(err *LoopError) {

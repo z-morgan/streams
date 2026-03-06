@@ -96,6 +96,10 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
+		if implResp.SessionID != "" {
+			s.SetSessionID(implResp.SessionID)
+		}
+
 		idsAfterImpl, err := beads.ListOpenChildren(s.BeadsParentID)
 		if err != nil {
 			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to list open children after implement", err.Error())
