@@ -358,9 +358,10 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedID = st.ID
 			m.view = viewDetail
 			m.detail.contentWidth = m.width
-			m.detail.snapCursor = len(st.GetSnapshots()) - 1
-			if m.detail.snapCursor < 0 {
-				m.detail.snapCursor = 0
+			rows := buildIterationList(st)
+			m.detail.iterCursor = len(rows) - 1
+			if m.detail.iterCursor < 0 {
+				m.detail.iterCursor = 0
 			}
 		} else {
 			return m.setStatus("No stream selected. Press n to create one.")
@@ -441,11 +442,11 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(m.selectedID)
-	snapCount := 0
+	iterCount := 0
 	if st != nil {
-		snapCount = len(st.GetSnapshots())
+		iterCount = len(buildIterationList(st))
 	}
-	m.detail.clampCursor(snapCount)
+	m.detail.clampCursor(iterCount)
 
 	switch msg.String() {
 	case "esc", "q":
@@ -453,12 +454,12 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "j", "down":
-		m.detail.snapCursor++
-		m.detail.clampCursor(snapCount)
+		m.detail.iterCursor++
+		m.detail.clampCursor(iterCount)
 
 	case "k", "up":
-		m.detail.snapCursor--
-		m.detail.clampCursor(snapCount)
+		m.detail.iterCursor--
+		m.detail.clampCursor(iterCount)
 
 	case "s":
 		if st != nil {
@@ -796,7 +797,7 @@ func (m Model) View() string {
 		if layoutWidth == 0 {
 			layoutWidth = m.width
 		}
-		content := renderDetail(st, m.detail.snapCursor, layoutWidth, m.height)
+		content := renderDetail(st, m.detail, layoutWidth, m.height)
 		if m.errorMsg != "" {
 			content += "\n" + errorBlockStyle.Render(m.errorMsg)
 		}

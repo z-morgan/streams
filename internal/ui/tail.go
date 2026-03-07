@@ -11,6 +11,34 @@ type tailView struct {
 	scrollOffset int // lines scrolled up from bottom (0 = auto-follow)
 }
 
+func renderTailContent(st *stream.Stream, width, availableHeight int) string {
+	lines := st.GetOutputLines()
+	if len(lines) == 0 {
+		return helpStyle.Render("No output yet.")
+	}
+
+	if availableHeight < 5 {
+		availableHeight = 5
+	}
+
+	startIdx := len(lines) - availableHeight
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	var b strings.Builder
+	for i := startIdx; i < len(lines); i++ {
+		line := lines[i]
+		if strings.HasPrefix(line, "> ") {
+			b.WriteString(toolLineStyle.Render(line))
+		} else {
+			b.WriteString(wrapText(line, width-2))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func renderTail(st *stream.Stream, tv tailView, width, height int) string {
 	if st == nil {
 		return "No stream selected."

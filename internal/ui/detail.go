@@ -10,24 +10,80 @@ import (
 )
 
 type detailView struct {
-	snapCursor   int
+	iterCursor   int
+	tailScroll   int
 	contentWidth int // layout width captured on entry; 0 = not yet set
 }
 
 func (d *detailView) clampCursor(count int) {
 	if count == 0 {
-		d.snapCursor = 0
+		d.iterCursor = 0
 		return
 	}
-	if d.snapCursor >= count {
-		d.snapCursor = count - 1
+	if d.iterCursor >= count {
+		d.iterCursor = count - 1
 	}
-	if d.snapCursor < 0 {
-		d.snapCursor = 0
+	if d.iterCursor < 0 {
+		d.iterCursor = 0
 	}
 }
 
-func renderDetail(st *stream.Stream, snapCursor int, width, height int) string {
+type iterationRow struct {
+	Phase         string
+	Iteration     int
+	IsInProgress  bool
+	IsPaused      bool
+	HasError      bool
+	SnapshotIndex int // -1 for in-progress rows
+}
+
+func buildIterationList(st *stream.Stream) []iterationRow {
+	snaps := st.GetSnapshots()
+	var rows []iterationRow
+
+	for i, snap := range snaps {
+		rows = append(rows, iterationRow{
+			Phase:         snap.Phase,
+			Iteration:     snap.Iteration,
+			HasError:      snap.Error != nil,
+			SnapshotIndex: i,
+		})
+	}
+
+	status := st.GetStatus()
+	currentIter := st.GetIteration()
+
+	if status == stream.StatusRunning {
+		rows = append(rows, iterationRow{
+			Phase:         currentPhase(st),
+			Iteration:     currentIter,
+			IsInProgress:  true,
+			SnapshotIndex: -1,
+		})
+	} else if status == stream.StatusPaused {
+		// Append a paused row if no snapshot matches the current iteration
+		hasSnapshot := false
+		for _, snap := range snaps {
+			if snap.Iteration == currentIter && snap.Phase == currentPhase(st) {
+				hasSnapshot = true
+				break
+			}
+		}
+		if !hasSnapshot {
+			rows = append(rows, iterationRow{
+				Phase:         currentPhase(st),
+				Iteration:     currentIter,
+				IsInProgress:  true,
+				IsPaused:      true,
+				SnapshotIndex: -1,
+			})
+		}
+	}
+
+	return rows
+}
+
+func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
 	if st == nil {
 		return "No stream selected."
 	}
@@ -40,39 +96,60 @@ func renderDetail(st *stream.Stream, snapCursor int, width, height int) string {
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
+	rows := buildIterationList(st)
 	snaps := st.GetSnapshots()
 
-	if len(snaps) == 0 {
-		b.WriteString(helpStyle.Render("No snapshots yet."))
+	if len(rows) == 0 {
+		b.WriteString(helpStyle.Render("Waiting for output..."))
 		b.WriteString("\n")
 	} else {
-		// Two-pane: left = snapshot list, right = selected snapshot details
+		// Two-pane: left = iteration list, right = selected iteration details
 		leftWidth := 25
 		rightWidth := width - leftWidth - 3 // 3 for separator
 		if rightWidth < 10 {
 			rightWidth = 10
 		}
 
-		left := renderSnapshotList(snaps, snapCursor, leftWidth)
-		right := renderSnapshotDetail(snaps, snapCursor, rightWidth)
+		left := renderIterationList(rows, dv.iterCursor, leftWidth)
+
+		var right string
+		cursor := dv.iterCursor
+		if cursor >= 0 && cursor < len(rows) {
+			row := rows[cursor]
+			if row.IsInProgress {
+				right = renderTailContent(st, rightWidth, height-4)
+				if row.IsPaused {
+					right += "\n" + helpStyle.Render("(paused)")
+				}
+			} else {
+				right = renderSnapshotDetail(snaps, row.SnapshotIndex, rightWidth)
+			}
+		}
 
 		b.WriteString(joinPanes(left, right, leftWidth))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("j/k: snapshots  t: tail  a: attach  s: start  x: stop  g: guidance  q/esc: back"))
+	b.WriteString(helpStyle.Render("j/k: iterations  a: attach  s: start  x: stop  g: guidance  q/esc: back"))
 
 	return b.String()
 }
 
-func renderSnapshotList(snaps []stream.Snapshot, cursor int, width int) string {
+func renderIterationList(rows []iterationRow, cursor int, width int) string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Snapshots"))
+	b.WriteString(labelStyle.Render("Iterations"))
 	b.WriteString("\n")
 
-	for i, snap := range snaps {
-		label := fmt.Sprintf("%s %d", snap.Phase, snap.Iteration+1)
-		if snap.Error != nil {
+	for i, row := range rows {
+		label := fmt.Sprintf("%s %d", row.Phase, row.Iteration+1)
+		if row.IsInProgress {
+			if row.IsPaused {
+				label += " (paused)"
+			} else {
+				label = "> " + label + "..."
+			}
+		}
+		if row.HasError {
 			label += " !"
 		}
 
