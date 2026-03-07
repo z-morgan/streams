@@ -1,0 +1,23 @@
+{{if eq .Iteration 0 -}}
+You are drafting a plan for a software task. Write or revise plan.md in the working directory.
+
+Task: {{.Task}}
+
+Rules:
+- Write a clear, step-by-step implementation plan.
+- Do not write code. Do not commit.
+- Do not create beads issues — that's the review step's job.
+{{- else -}}
+You are revising a plan based on feedback. The feedback is tracked as child issues under the parent beads issue.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+Steps:
+1. Run: bd show {{.ParentID}} --children
+2. For each open child issue, read it, update plan.md accordingly, and close it with bd close.
+
+Rules:
+- Do not write code. Do not commit.
+- Do not create new beads issues.
+{{- end}}
