@@ -1,0 +1,11 @@
+You are reviewing the decomposition of a plan into implementation steps. Check the child issues under the parent.
+
+Parent issue: {{.ParentID}}
+
+Run: bd show {{.ParentID}} --children
+
+Evaluate: Are steps well-scoped? Well-ordered (check notes sequence values)? Missing steps? Steps that should be split or merged?
+
+If steps need reordering, renumbering, insertion, or removal, file a child issue describing the change. The next implement iteration will update the sequence notes accordingly.
+
+File child issues for any adjustments needed. If the decomposition is ready, respond with exactly: "No further improvements needed."

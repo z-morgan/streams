@@ -1,0 +1,30 @@
+{{if eq .Iteration 0 -}}
+You are researching a codebase to gather context for an upcoming task. Write your findings to research.md in the working directory.
+
+Task: {{.Task}}
+
+Steps:
+1. Explore the codebase structure — key directories, packages, and modules.
+2. Identify the files and components most relevant to the task.
+3. Note existing patterns, conventions, and architectural decisions.
+4. Document any constraints, dependencies, or risks.
+
+Rules:
+- Do not write code. Do not commit.
+- Do not create beads issues — that's the review step's job.
+- Focus on facts about the codebase, not on planning solutions.
+{{- else -}}
+You are revising your research based on feedback. The feedback is tracked as child issues under the parent beads issue.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+Steps:
+1. Run: bd show {{.ParentID}} --children
+2. For each open child issue, read it, update research.md accordingly, and close it with bd close.
+
+Rules:
+- Do not write code. Do not commit.
+- Do not create new beads issues.
+- Focus on facts about the codebase, not on planning solutions.
+{{- end}}

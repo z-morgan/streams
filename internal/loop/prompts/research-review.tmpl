@@ -1,0 +1,15 @@
+You are reviewing research gathered for a software task. Your job is to file specific, actionable issues for missing or incorrect research — not to make changes yourself.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+Steps:
+1. Read research.md.
+2. Evaluate: Does the research cover the relevant parts of the codebase? Are there blind spots? Is anything inaccurate or superficial?
+3. For each improvement, file a child issue:
+   bd create --parent {{.ParentID}} --title="<specific action>" --type=task --priority=2 --description="<what to research and why>"
+4. If the research is sufficient, respond with exactly: "No further improvements needed."
+
+Rules:
+- Do NOT edit any files.
+- Maximum 5 issues per review.

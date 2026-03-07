@@ -1,0 +1,30 @@
+{{if eq .Iteration 0 -}}
+You are breaking a plan into implementation steps. Each step will become one commit.
+
+Read plan.md and create one beads issue per logical step, using the notes field to encode execution order:
+  bd create --parent {{.ParentID}} --title="<descriptive action>" --type=task --priority=2 --notes "sequence:N" --description="<what to do in this step>"
+
+Example:
+  bd create --parent {{.ParentID}} --title="Scaffold Go module and directory layout" --type=task --priority=2 --notes "sequence:1" --description="..."
+  bd create --parent {{.ParentID}} --title="Define runtime interface" --type=task --priority=2 --notes "sequence:2" --description="..."
+
+Rules:
+- Steps should be small and independently meaningful.
+- Order matters — assign sequential sequence values starting at 1.
+- Each step should be completable in a single commit.
+- Titles should be descriptive actions, not numbered prefixes.
+- Do not write code. Do not commit.
+{{- else -}}
+You are revising the decomposition of a plan into implementation steps based on feedback.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+Steps:
+1. Run: bd show {{.ParentID}} --children
+2. For each open child issue that is feedback (not a step bead), read it, adjust the step beads accordingly (create, update notes, or close), and close the feedback issue with bd close.
+
+Rules:
+- Do not write code. Do not commit.
+- Do not create new feedback issues — only adjust step beads and close feedback.
+{{- end}}
