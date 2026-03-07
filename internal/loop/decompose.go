@@ -22,7 +22,7 @@ func (d *DecomposePhase) ReviewTools() []string {
 }
 
 func (d *DecomposePhase) IsConverged(result IterationResult) bool {
-	return result.OpenChildrenAfter <= result.OpenChildrenBefore
+	return result.OpenAfterReview <= result.OpenBeforeReview
 }
 
 func (d *DecomposePhase) BeforeReview(_ PhaseContext) error {

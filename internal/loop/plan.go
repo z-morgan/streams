@@ -22,7 +22,7 @@ func (p *PlanPhase) ReviewTools() []string {
 }
 
 func (p *PlanPhase) IsConverged(result IterationResult) bool {
-	return result.OpenChildrenAfter <= result.OpenChildrenBefore
+	return result.OpenAfterReview <= result.OpenBeforeReview
 }
 
 func (p *PlanPhase) BeforeReview(_ PhaseContext) error {

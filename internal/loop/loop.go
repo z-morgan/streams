@@ -164,8 +164,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// --- Convergence check ---
 		result := IterationResult{
 			ReviewText:         reviewResp.Text,
-			OpenChildrenBefore: len(idsAfterImpl),
-			OpenChildrenAfter:  len(idsAfterReview),
+			OpenBeforeReview: len(idsAfterImpl),
+			OpenAfterReview:  len(idsAfterReview),
 			BeadsClosed:        beadsClosed,
 			BeadsOpened:        beadsOpened,
 		}

@@ -77,7 +77,7 @@ func (p *mockPhase) ReviewPrompt(_ PhaseContext) (string, error)    { return "re
 func (p *mockPhase) ImplementTools() []string              { return []string{"Bash"} }
 func (p *mockPhase) ReviewTools() []string                 { return []string{"Bash"} }
 func (p *mockPhase) IsConverged(r IterationResult) bool {
-	return r.OpenChildrenAfter <= r.OpenChildrenBefore
+	return r.OpenAfterReview <= r.OpenBeforeReview
 }
 func (p *mockPhase) BeforeReview(_ PhaseContext) error { return nil }
 func (p *mockPhase) TransitionMode() Transition        { return TransitionPause }

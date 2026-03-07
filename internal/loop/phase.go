@@ -40,8 +40,8 @@ type PhaseContext struct {
 // The Go loop populates this — agents don't produce it directly.
 type IterationResult struct {
 	ReviewText         string
-	OpenChildrenBefore int
-	OpenChildrenAfter  int
+	OpenBeforeReview int
+	OpenAfterReview  int
 	BeadsClosed        []string
 	BeadsOpened        []string
 }

@@ -97,13 +97,13 @@ func TestPlanPhase_Tools(t *testing.T) {
 func TestPlanPhase_IsConverged(t *testing.T) {
 	p := &PlanPhase{}
 
-	if !p.IsConverged(IterationResult{OpenChildrenBefore: 2, OpenChildrenAfter: 1}) {
+	if !p.IsConverged(IterationResult{OpenBeforeReview: 2, OpenAfterReview: 1}) {
 		t.Error("expected converged when after < before")
 	}
-	if !p.IsConverged(IterationResult{OpenChildrenBefore: 0, OpenChildrenAfter: 0}) {
+	if !p.IsConverged(IterationResult{OpenBeforeReview: 0, OpenAfterReview: 0}) {
 		t.Error("expected converged when both zero")
 	}
-	if p.IsConverged(IterationResult{OpenChildrenBefore: 1, OpenChildrenAfter: 3}) {
+	if p.IsConverged(IterationResult{OpenBeforeReview: 1, OpenAfterReview: 3}) {
 		t.Error("expected not converged when after > before")
 	}
 }

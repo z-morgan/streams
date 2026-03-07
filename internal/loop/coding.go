@@ -28,7 +28,7 @@ func (p *CodingPhase) ReviewTools() []string {
 }
 
 func (p *CodingPhase) IsConverged(result IterationResult) bool {
-	return result.OpenChildrenAfter <= result.OpenChildrenBefore
+	return result.OpenAfterReview <= result.OpenBeforeReview
 }
 
 // BeforeReview runs git rebase --autosquash to collapse fixup commits
