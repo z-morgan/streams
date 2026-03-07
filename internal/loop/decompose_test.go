@@ -34,6 +34,12 @@ func TestDecomposePhase_ImplementPromptFirstIteration(t *testing.T) {
 	if !strings.Contains(prompt, `--notes "sequence:N"`) {
 		t.Error("expected prompt to include notes sequence instructions")
 	}
+	if !strings.Contains(prompt, "--label step") {
+		t.Error("expected prompt to include --label step")
+	}
+	if !strings.Contains(prompt, "research.md") {
+		t.Error("expected prompt to reference research.md")
+	}
 }
 
 func TestDecomposePhase_ImplementPromptSubsequentIteration(t *testing.T) {
@@ -53,6 +59,12 @@ func TestDecomposePhase_ImplementPromptSubsequentIteration(t *testing.T) {
 	if !strings.Contains(prompt, "parent-1") {
 		t.Error("expected prompt to reference parent ID")
 	}
+	if !strings.Contains(prompt, `labeled "step"`) {
+		t.Error("expected subsequent-iteration prompt to explain step label distinction")
+	}
+	if !strings.Contains(prompt, "--label step") {
+		t.Error("expected subsequent-iteration prompt to include --label step for new steps")
+	}
 }
 
 func TestDecomposePhase_ReviewPrompt(t *testing.T) {
@@ -71,8 +83,11 @@ func TestDecomposePhase_ReviewPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "parent-1") {
 		t.Error("expected review prompt to reference parent ID")
 	}
-	if !strings.Contains(prompt, "notes sequence") {
-		t.Error("expected review prompt to mention notes sequence")
+	if !strings.Contains(prompt, "sequence:N") {
+		t.Error("expected review prompt to mention sequence:N")
+	}
+	if !strings.Contains(prompt, `labeled "step"`) {
+		t.Error("expected review prompt to explain step label distinction")
 	}
 }
 

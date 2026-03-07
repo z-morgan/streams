@@ -1,12 +1,14 @@
 {{if eq .Iteration 0 -}}
 You are breaking a plan into implementation steps. Each step will become one commit.
 
-Read plan.md and create one beads issue per logical step, using the notes field to encode execution order:
-  bd create --parent {{.ParentID}} --title="<descriptive action>" --type=task --priority=2 --notes "sequence:N" --description="<what to do in this step>"
+Read plan.md and create one beads issue per logical step. Use the notes field to encode execution order and the "step" label to distinguish steps from review feedback:
+  bd create --parent {{.ParentID}} --title="<descriptive action>" --type=task --priority=2 --label step --notes "sequence:N" --description="<what to do in this step>"
+
+If research.md exists in the working directory, you may reference it for additional context, but do not re-plan.
 
 Example:
-  bd create --parent {{.ParentID}} --title="Scaffold Go module and directory layout" --type=task --priority=2 --notes "sequence:1" --description="..."
-  bd create --parent {{.ParentID}} --title="Define runtime interface" --type=task --priority=2 --notes "sequence:2" --description="..."
+  bd create --parent {{.ParentID}} --title="Scaffold Go module and directory layout" --type=task --priority=2 --label step --notes "sequence:1" --description="..."
+  bd create --parent {{.ParentID}} --title="Define runtime interface" --type=task --priority=2 --label step --notes "sequence:2" --description="..."
 
 Rules:
 - Steps should be small and independently meaningful.
@@ -22,9 +24,11 @@ Parent issue: {{.ParentID}}
 
 Steps:
 1. Run: bd show {{.ParentID}} --children
-2. For each open child issue that is feedback (not a step bead), read it, adjust the step beads accordingly (create, update notes, or close), and close the feedback issue with bd close.
+2. Identify step beads (labeled "step") vs feedback beads (no "step" label).
+3. For each open feedback issue, read it, adjust the step beads accordingly (create with --label step, update notes, or close), and close the feedback issue with bd close.
 
 Rules:
 - Do not write code. Do not commit.
 - Do not create new feedback issues — only adjust step beads and close feedback.
+- New step beads must include --label step and --notes "sequence:N".
 {{- end}}

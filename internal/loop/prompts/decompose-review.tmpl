@@ -4,8 +4,10 @@ Parent issue: {{.ParentID}}
 
 Run: bd show {{.ParentID}} --children
 
+Step beads are labeled "step" and have notes with sequence:N values. Any child without the "step" label is review feedback from a prior iteration.
+
 Evaluate: Are steps well-scoped? Well-ordered (check notes sequence values)? Missing steps? Steps that should be split or merged?
 
-If steps need reordering, renumbering, insertion, or removal, file a child issue describing the change. The next implement iteration will update the sequence notes accordingly.
+If steps need reordering, renumbering, insertion, or removal, file a child issue describing the change (do NOT label it "step" — only the implement agent creates step beads). The next implement iteration will update the step beads accordingly.
 
 File child issues for any adjustments needed. If the decomposition is ready, respond with exactly: "No further improvements needed."
