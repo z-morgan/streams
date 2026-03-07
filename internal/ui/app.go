@@ -23,6 +23,7 @@ type PhaseNode struct {
 
 // phaseTree defines the available phases and their nesting.
 var phaseTree = []PhaseNode{
+	{Name: "research"},
 	{Name: "plan", Children: []PhaseNode{
 		{Name: "decompose"},
 	}},
@@ -438,11 +439,16 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(m.selectedID)
-	iterCount := 0
+	var rows []iterationRow
 	if st != nil {
-		iterCount = len(buildIterationList(st))
+		rows = buildIterationList(st)
 	}
-	m.detail.clampCursor(iterCount)
+	m.detail.clampCursor(len(rows))
+
+	// When focused on the right pane (tail output), handle scroll keys
+	if m.detail.focusRight {
+		return m.updateDetailFocusRight(msg, st)
+	}
 
 	switch msg.String() {
 	case "esc", "q":
@@ -451,11 +457,20 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "j", "down":
 		m.detail.iterCursor++
-		m.detail.clampCursor(iterCount)
+		m.detail.clampCursor(len(rows))
+		m.detail.tailScroll = 0
 
 	case "k", "up":
 		m.detail.iterCursor--
-		m.detail.clampCursor(iterCount)
+		m.detail.clampCursor(len(rows))
+		m.detail.tailScroll = 0
+
+	case "enter":
+		cursor := m.detail.iterCursor
+		if cursor >= 0 && cursor < len(rows) && rows[cursor].IsInProgress {
+			m.detail.focusRight = true
+			m.detail.tailScroll = 0
+		}
 
 	case "s":
 		if st != nil {
@@ -503,6 +518,38 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return claudeExitMsg{err: err}
 		})
+	}
+
+	return m, nil
+}
+
+func (m Model) updateDetailFocusRight(msg tea.KeyMsg, st *stream.Stream) (tea.Model, tea.Cmd) {
+	lineCount := 0
+	if st != nil {
+		lineCount = len(st.GetOutputLines())
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.detail.focusRight = false
+		return m, nil
+
+	case "j", "down":
+		if m.detail.tailScroll > 0 {
+			m.detail.tailScroll--
+		}
+
+	case "k", "up":
+		maxScroll := lineCount - 5
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if m.detail.tailScroll < maxScroll {
+			m.detail.tailScroll++
+		}
+
+	case "G":
+		m.detail.tailScroll = 0
 	}
 
 	return m, nil

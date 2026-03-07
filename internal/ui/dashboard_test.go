@@ -147,23 +147,31 @@ func TestRenderChannel(t *testing.T) {
 func TestFlattenPhaseTree(t *testing.T) {
 	flat := flattenPhaseTree(phaseTree, 0)
 
-	if len(flat) != 3 {
-		t.Fatalf("expected 3 flat phases, got %d", len(flat))
+	if len(flat) != 4 {
+		t.Fatalf("expected 4 flat phases, got %d", len(flat))
 	}
 
-	if flat[0].Name != "plan" || flat[0].Depth != 0 {
-		t.Errorf("flat[0] = %+v, want plan depth 0", flat[0])
+	if flat[0].Name != "research" || flat[0].Depth != 0 {
+		t.Errorf("flat[0] = %+v, want research depth 0", flat[0])
 	}
-	if flat[1].Name != "decompose" || flat[1].Depth != 1 {
-		t.Errorf("flat[1] = %+v, want decompose depth 1", flat[1])
+	if flat[1].Name != "plan" || flat[1].Depth != 0 {
+		t.Errorf("flat[1] = %+v, want plan depth 0", flat[1])
 	}
-	if flat[2].Name != "coding" || flat[2].Depth != 0 {
-		t.Errorf("flat[2] = %+v, want coding depth 0", flat[2])
+	if flat[2].Name != "decompose" || flat[2].Depth != 1 {
+		t.Errorf("flat[2] = %+v, want decompose depth 1", flat[2])
+	}
+	if flat[3].Name != "coding" || flat[3].Depth != 0 {
+		t.Errorf("flat[3] = %+v, want coding depth 0", flat[3])
 	}
 }
 
 func TestChildPhases(t *testing.T) {
-	children := childPhases(phaseTree, "plan")
+	children := childPhases(phaseTree, "research")
+	if len(children) != 0 {
+		t.Errorf("childPhases(research) = %v, want []", children)
+	}
+
+	children = childPhases(phaseTree, "plan")
 	if len(children) != 1 || children[0] != "decompose" {
 		t.Errorf("childPhases(plan) = %v, want [decompose]", children)
 	}
@@ -185,8 +193,9 @@ func TestSelectedPipeline(t *testing.T) {
 		checked map[string]bool
 		want    string
 	}{
-		{"all checked", map[string]bool{"plan": true, "decompose": true, "coding": true}, "plan,decompose,coding"},
+		{"all checked", map[string]bool{"research": true, "plan": true, "decompose": true, "coding": true}, "research,plan,decompose,coding"},
 		{"plan without decompose", map[string]bool{"plan": true, "coding": true}, "plan,coding"},
+		{"research and code", map[string]bool{"research": true, "coding": true}, "research,coding"},
 		{"code only", map[string]bool{"coding": true}, "coding"},
 		{"none checked", map[string]bool{}, ""},
 	}

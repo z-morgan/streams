@@ -31,7 +31,7 @@ func run() int {
 	maxIterations := flag.Int("max-iterations", 10, "maximum iteration count")
 	maxBudget := flag.String("max-budget-per-step", "2.00", "max USD budget per CLI invocation")
 	dataDir := flag.String("data-dir", "", "directory for stream data (default: <dir>/.streams)")
-	pipeline := flag.String("pipeline", "coding", "comma-separated pipeline phases (e.g. plan,decompose,coding)")
+	pipeline := flag.String("pipeline", "coding", "comma-separated pipeline phases (e.g. research,plan,decompose,coding)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))

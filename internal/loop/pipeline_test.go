@@ -12,7 +12,7 @@ import (
 
 func pipelineFactory(name string) (MacroPhase, error) {
 	switch name {
-	case "plan", "decompose":
+	case "research", "plan", "decompose":
 		return &mockAutoAdvancePhase{}, nil
 	case "coding":
 		return &mockPhase{}, nil
