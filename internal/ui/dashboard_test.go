@@ -144,6 +144,41 @@ func TestRenderChannel(t *testing.T) {
 	})
 }
 
+func TestDefaultPipelineIndex(t *testing.T) {
+	tests := []struct {
+		name     string
+		pipeline []string
+		want     int
+	}{
+		{"matches plan+code", []string{"plan", "coding"}, 0},
+		{"matches full", []string{"plan", "decompose", "coding"}, 1},
+		{"matches code only", []string{"coding"}, 2},
+		{"no match defaults to last", []string{"custom"}, len(pipelinePresets) - 1},
+		{"nil defaults to last", nil, len(pipelinePresets) - 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := defaultPipelineIndex(tt.pipeline)
+			if got != tt.want {
+				t.Errorf("defaultPipelineIndex(%v) = %d, want %d", tt.pipeline, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPipelineMatch(t *testing.T) {
+	if !pipelineMatch([]string{"a", "b"}, []string{"a", "b"}) {
+		t.Error("expected match for identical slices")
+	}
+	if pipelineMatch([]string{"a", "b"}, []string{"a", "c"}) {
+		t.Error("expected no match for different slices")
+	}
+	if pipelineMatch([]string{"a"}, []string{"a", "b"}) {
+		t.Error("expected no match for different lengths")
+	}
+}
+
 func TestRenderChannels(t *testing.T) {
 	t.Run("empty streams", func(t *testing.T) {
 		result := renderChannels(nil, 0, 0, 120, 40)
