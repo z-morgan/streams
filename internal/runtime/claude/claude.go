@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/zmorgan/streams/internal/runtime"
 )
@@ -44,6 +46,8 @@ func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Re
 	args = append(args, req.Prompt)
 
 	cmd := exec.CommandContext(ctx, r.command(), args...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 5 * time.Second
 	if r.WorkDir != "" {
 		cmd.Dir = r.WorkDir
 	}
@@ -90,6 +94,8 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 	args = append(args, req.Prompt)
 
 	cmd := exec.CommandContext(ctx, r.command(), args...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 5 * time.Second
 	if r.WorkDir != "" {
 		cmd.Dir = r.WorkDir
 	}
