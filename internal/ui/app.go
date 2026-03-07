@@ -54,9 +54,11 @@ type Model struct {
 	guidanceInput textarea.Model
 
 	// New stream overlay state.
-	showNewStream  bool
-	newStreamInput textinput.Model
-	creating       bool // true while orch.Create is running
+	showNewStream     bool
+	newStreamInput    textinput.Model
+	newStreamStep     int // 0 = task input, 1 = pipeline picker
+	newStreamPipeline int // cursor index into pipelinePresets
+	creating          bool // true while orch.Create is running
 
 	// Delete confirmation overlay state.
 	showDeleteConfirm bool
@@ -302,6 +304,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "n":
 		m.showNewStream = true
+		m.newStreamStep = 0
 		m.newStreamInput.Reset()
 		m.newStreamInput.Width = m.inputWidth()
 		m.newStreamInput.Focus()
@@ -481,6 +484,10 @@ func (m Model) updateTail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.newStreamStep == 1 {
+		return m.updateNewStreamPipeline(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -493,24 +500,81 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if task == "" {
 				return m, nil
 			}
-			m.showNewStream = false
-			if m.orch.NeedsBeadsInit() {
-				m.pendingTask = task
-				m.showBeadsInit = true
-				return m, nil
-			}
-			m.creating = true
-			orch := m.orch
-			return m, func() tea.Msg {
-				st, err := orch.Create(task, nil)
-				return streamCreatedMsg{stream: st, err: err}
-			}
+			m.newStreamStep = 1
+			m.newStreamPipeline = defaultPipelineIndex(m.orch.DefaultPipeline())
+			return m, nil
 		}
 	}
 
 	var cmd tea.Cmd
 	m.newStreamInput, cmd = m.newStreamInput.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.newStreamStep = 0
+			return m, nil
+
+		case "j", "down":
+			if m.newStreamPipeline < len(pipelinePresets)-1 {
+				m.newStreamPipeline++
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.newStreamPipeline > 0 {
+				m.newStreamPipeline--
+			}
+			return m, nil
+
+		case "enter":
+			task := m.newStreamInput.Value()
+			pipeline := pipelinePresets[m.newStreamPipeline].Pipeline
+			m.showNewStream = false
+			m.newStreamStep = 0
+			if m.orch.NeedsBeadsInit() {
+				m.pendingTask = task
+				m.pendingPipeline = pipeline
+				m.showBeadsInit = true
+				return m, nil
+			}
+			m.creating = true
+			orch := m.orch
+			return m, func() tea.Msg {
+				st, err := orch.Create(task, pipeline)
+				return streamCreatedMsg{stream: st, err: err}
+			}
+		}
+	}
+
+	return m, nil
+}
+
+// defaultPipelineIndex returns the preset index matching the given pipeline,
+// or the last preset (code only) if no match.
+func defaultPipelineIndex(pipeline []string) int {
+	for i, p := range pipelinePresets {
+		if pipelineMatch(p.Pipeline, pipeline) {
+			return i
+		}
+	}
+	return len(pipelinePresets) - 1
+}
+
+func pipelineMatch(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -628,7 +692,7 @@ func (m Model) View() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamInput, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamInput, m.newStreamStep, m.newStreamPipeline, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -686,10 +750,30 @@ func (m Model) View() string {
 	}
 }
 
-func renderNewStreamOverlay(ti textinput.Model, width, height int) string {
-	overlay := titleStyle.Render("New Stream") + "\n\n"
-	overlay += ti.View() + "\n\n"
-	overlay += helpStyle.Render("enter: create  esc: cancel")
+func renderNewStreamOverlay(ti textinput.Model, step, pipelineCursor, width, height int) string {
+	var overlay string
+
+	if step == 0 {
+		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay += ti.View() + "\n\n"
+		overlay += helpStyle.Render("enter: next  esc: cancel")
+	} else {
+		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay += helpStyle.Render("Task: "+ti.Value()) + "\n\n"
+		overlay += "Pipeline:\n"
+		for i, p := range pipelinePresets {
+			cursor := "  "
+			if i == pipelineCursor {
+				cursor = cursorStyle.Render("> ")
+			}
+			label := p.Label
+			if i == pipelineCursor {
+				label = selectedRowStyle.Render(label)
+			}
+			overlay += cursor + label + "\n"
+		}
+		overlay += "\n" + helpStyle.Render("j/k: select  enter: create  esc: back")
+	}
 
 	maxWidth := width - 6
 	if maxWidth < 40 {

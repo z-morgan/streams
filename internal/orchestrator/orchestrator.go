@@ -377,6 +377,11 @@ func (o *Orchestrator) SendGuidance(id string, text string) error {
 	return nil
 }
 
+// DefaultPipeline returns the global default pipeline from config.
+func (o *Orchestrator) DefaultPipeline() []string {
+	return o.config.Pipeline
+}
+
 // IsRunning returns whether a stream's loop goroutine is active.
 func (o *Orchestrator) IsRunning(id string) bool {
 	o.mu.RLock()
