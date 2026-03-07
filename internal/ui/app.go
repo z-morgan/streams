@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -13,16 +14,78 @@ import (
 	"github.com/zmorgan/streams/internal/stream"
 )
 
-// PipelinePreset defines a named pipeline option for the new stream picker.
-type PipelinePreset struct {
-	Label    string
-	Pipeline []string
+// PhaseNode defines a phase that can be selected when creating a stream.
+// Children are nested under their parent (e.g., decompose under plan).
+type PhaseNode struct {
+	Name     string
+	Children []PhaseNode
 }
 
-var pipelinePresets = []PipelinePreset{
-	{"plan + code", []string{"plan", "coding"}},
-	{"full", []string{"plan", "decompose", "coding"}},
-	{"code only", []string{"coding"}},
+// phaseTree defines the available phases and their nesting.
+var phaseTree = []PhaseNode{
+	{Name: "plan", Children: []PhaseNode{
+		{Name: "decompose"},
+	}},
+	{Name: "coding"},
+}
+
+// flatPhase is a flattened view of the phase tree for cursor navigation.
+type flatPhase struct {
+	Name  string
+	Depth int
+}
+
+// flattenPhaseTree returns a flat list of phases with depth info for rendering.
+func flattenPhaseTree(nodes []PhaseNode, depth int) []flatPhase {
+	var result []flatPhase
+	for _, node := range nodes {
+		result = append(result, flatPhase{Name: node.Name, Depth: depth})
+		result = append(result, flattenPhaseTree(node.Children, depth+1)...)
+	}
+	return result
+}
+
+// childPhases returns the names of all children (recursive) of the given phase.
+func childPhases(nodes []PhaseNode, parent string) []string {
+	for _, node := range nodes {
+		if node.Name == parent {
+			return collectNames(node.Children)
+		}
+		if found := childPhases(node.Children, parent); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func collectNames(nodes []PhaseNode) []string {
+	var names []string
+	for _, node := range nodes {
+		names = append(names, node.Name)
+		names = append(names, collectNames(node.Children)...)
+	}
+	return names
+}
+
+// selectedPipeline builds an ordered pipeline from the checked phases.
+func selectedPipeline(checked map[string]bool, nodes []PhaseNode) []string {
+	var result []string
+	for _, node := range nodes {
+		if checked[node.Name] {
+			result = append(result, node.Name)
+		}
+		result = append(result, selectedPipeline(checked, node.Children)...)
+	}
+	return result
+}
+
+// defaultPhaseChecks returns a checked map matching the given pipeline.
+func defaultPhaseChecks(pipeline []string) map[string]bool {
+	checked := make(map[string]bool)
+	for _, name := range pipeline {
+		checked[name] = true
+	}
+	return checked
 }
 
 type clearStatusMsg struct{}
@@ -56,9 +119,10 @@ type Model struct {
 	// New stream overlay state.
 	showNewStream     bool
 	newStreamInput    textinput.Model
-	newStreamStep     int // 0 = task input, 1 = pipeline picker
-	newStreamPipeline int // cursor index into pipelinePresets
-	creating          bool // true while orch.Create is running
+	newStreamStep     int             // 0 = task input, 1 = phase picker
+	newStreamPhaseCur int             // cursor into flattened phase list
+	newStreamChecked  map[string]bool // which phases are checked
+	creating          bool            // true while orch.Create is running
 
 	// Delete confirmation overlay state.
 	showDeleteConfirm bool
@@ -308,6 +372,8 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.newStreamInput.Reset()
 		m.newStreamInput.Width = m.inputWidth()
 		m.newStreamInput.Focus()
+		m.newStreamChecked = defaultPhaseChecks(m.orch.DefaultPipeline())
+		m.newStreamPhaseCur = 0
 		return m, textinput.Blink
 
 	case "s":
@@ -501,7 +567,6 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.newStreamStep = 1
-			m.newStreamPipeline = defaultPipelineIndex(m.orch.DefaultPipeline())
 			return m, nil
 		}
 	}
@@ -512,6 +577,8 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
+	flat := flattenPhaseTree(phaseTree, 0)
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -520,20 +587,40 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "j", "down":
-			if m.newStreamPipeline < len(pipelinePresets)-1 {
-				m.newStreamPipeline++
+			if m.newStreamPhaseCur < len(flat)-1 {
+				m.newStreamPhaseCur++
 			}
 			return m, nil
 
 		case "k", "up":
-			if m.newStreamPipeline > 0 {
-				m.newStreamPipeline--
+			if m.newStreamPhaseCur > 0 {
+				m.newStreamPhaseCur--
+			}
+			return m, nil
+
+		case " ":
+			name := flat[m.newStreamPhaseCur].Name
+			if m.newStreamChecked[name] {
+				// Unchecking: also uncheck children
+				m.newStreamChecked[name] = false
+				for _, child := range childPhases(phaseTree, name) {
+					m.newStreamChecked[child] = false
+				}
+			} else {
+				// Checking: also check children
+				m.newStreamChecked[name] = true
+				for _, child := range childPhases(phaseTree, name) {
+					m.newStreamChecked[child] = true
+				}
 			}
 			return m, nil
 
 		case "enter":
+			pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
+			if len(pipeline) == 0 {
+				return m, nil
+			}
 			task := m.newStreamInput.Value()
-			pipeline := pipelinePresets[m.newStreamPipeline].Pipeline
 			m.showNewStream = false
 			m.newStreamStep = 0
 			if m.orch.NeedsBeadsInit() {
@@ -552,29 +639,6 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-// defaultPipelineIndex returns the preset index matching the given pipeline,
-// or the last preset (code only) if no match.
-func defaultPipelineIndex(pipeline []string) int {
-	for i, p := range pipelinePresets {
-		if pipelineMatch(p.Pipeline, pipeline) {
-			return i
-		}
-	}
-	return len(pipelinePresets) - 1
-}
-
-func pipelineMatch(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -692,7 +756,7 @@ func (m Model) View() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamInput, m.newStreamStep, m.newStreamPipeline, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -750,7 +814,7 @@ func (m Model) View() string {
 	}
 }
 
-func renderNewStreamOverlay(ti textinput.Model, step, pipelineCursor, width, height int) string {
+func renderNewStreamOverlay(ti textinput.Model, step, phaseCursor int, checked map[string]bool, width, height int) string {
 	var overlay string
 
 	if step == 0 {
@@ -760,19 +824,25 @@ func renderNewStreamOverlay(ti textinput.Model, step, pipelineCursor, width, hei
 	} else {
 		overlay = titleStyle.Render("New Stream") + "\n\n"
 		overlay += helpStyle.Render("Task: "+ti.Value()) + "\n\n"
-		overlay += "Pipeline:\n"
-		for i, p := range pipelinePresets {
+		overlay += "Phases:\n"
+		flat := flattenPhaseTree(phaseTree, 0)
+		for i, fp := range flat {
 			cursor := "  "
-			if i == pipelineCursor {
+			if i == phaseCursor {
 				cursor = cursorStyle.Render("> ")
 			}
-			label := p.Label
-			if i == pipelineCursor {
+			indent := strings.Repeat("  ", fp.Depth)
+			check := "[ ] "
+			if checked[fp.Name] {
+				check = "[x] "
+			}
+			label := fp.Name
+			if i == phaseCursor {
 				label = selectedRowStyle.Render(label)
 			}
-			overlay += cursor + label + "\n"
+			overlay += cursor + indent + check + label + "\n"
 		}
-		overlay += "\n" + helpStyle.Render("j/k: select  enter: create  esc: back")
+		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
 	}
 
 	maxWidth := width - 6

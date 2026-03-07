@@ -144,38 +144,71 @@ func TestRenderChannel(t *testing.T) {
 	})
 }
 
-func TestDefaultPipelineIndex(t *testing.T) {
+func TestFlattenPhaseTree(t *testing.T) {
+	flat := flattenPhaseTree(phaseTree, 0)
+
+	if len(flat) != 3 {
+		t.Fatalf("expected 3 flat phases, got %d", len(flat))
+	}
+
+	if flat[0].Name != "plan" || flat[0].Depth != 0 {
+		t.Errorf("flat[0] = %+v, want plan depth 0", flat[0])
+	}
+	if flat[1].Name != "decompose" || flat[1].Depth != 1 {
+		t.Errorf("flat[1] = %+v, want decompose depth 1", flat[1])
+	}
+	if flat[2].Name != "coding" || flat[2].Depth != 0 {
+		t.Errorf("flat[2] = %+v, want coding depth 0", flat[2])
+	}
+}
+
+func TestChildPhases(t *testing.T) {
+	children := childPhases(phaseTree, "plan")
+	if len(children) != 1 || children[0] != "decompose" {
+		t.Errorf("childPhases(plan) = %v, want [decompose]", children)
+	}
+
+	children = childPhases(phaseTree, "coding")
+	if len(children) != 0 {
+		t.Errorf("childPhases(coding) = %v, want []", children)
+	}
+
+	children = childPhases(phaseTree, "nonexistent")
+	if children != nil {
+		t.Errorf("childPhases(nonexistent) = %v, want nil", children)
+	}
+}
+
+func TestSelectedPipeline(t *testing.T) {
 	tests := []struct {
-		name     string
-		pipeline []string
-		want     int
+		name    string
+		checked map[string]bool
+		want    string
 	}{
-		{"matches plan+code", []string{"plan", "coding"}, 0},
-		{"matches full", []string{"plan", "decompose", "coding"}, 1},
-		{"matches code only", []string{"coding"}, 2},
-		{"no match defaults to last", []string{"custom"}, len(pipelinePresets) - 1},
-		{"nil defaults to last", nil, len(pipelinePresets) - 1},
+		{"all checked", map[string]bool{"plan": true, "decompose": true, "coding": true}, "plan,decompose,coding"},
+		{"plan without decompose", map[string]bool{"plan": true, "coding": true}, "plan,coding"},
+		{"code only", map[string]bool{"coding": true}, "coding"},
+		{"none checked", map[string]bool{}, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := defaultPipelineIndex(tt.pipeline)
-			if got != tt.want {
-				t.Errorf("defaultPipelineIndex(%v) = %d, want %d", tt.pipeline, got, tt.want)
+			got := selectedPipeline(tt.checked, phaseTree)
+			result := strings.Join(got, ",")
+			if result != tt.want {
+				t.Errorf("selectedPipeline = %q, want %q", result, tt.want)
 			}
 		})
 	}
 }
 
-func TestPipelineMatch(t *testing.T) {
-	if !pipelineMatch([]string{"a", "b"}, []string{"a", "b"}) {
-		t.Error("expected match for identical slices")
+func TestDefaultPhaseChecks(t *testing.T) {
+	checked := defaultPhaseChecks([]string{"plan", "coding"})
+	if !checked["plan"] || !checked["coding"] {
+		t.Error("expected plan and coding to be checked")
 	}
-	if pipelineMatch([]string{"a", "b"}, []string{"a", "c"}) {
-		t.Error("expected no match for different slices")
-	}
-	if pipelineMatch([]string{"a"}, []string{"a", "b"}) {
-		t.Error("expected no match for different lengths")
+	if checked["decompose"] {
+		t.Error("expected decompose to be unchecked")
 	}
 }
 
