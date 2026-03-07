@@ -96,7 +96,6 @@ type view int
 const (
 	viewDashboard view = iota
 	viewDetail
-	viewTail
 )
 
 // Model is the root Bubble Tea model for the streams TUI.
@@ -107,7 +106,6 @@ type Model struct {
 	view      view
 	dashboard dashboardView
 	detail    detailView
-	tail      tailView
 
 	// The currently selected stream ID (set when entering detail view).
 	selectedID string
@@ -257,8 +255,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDashboard(msg)
 		case viewDetail:
 			return m.updateDetail(msg)
-		case viewTail:
-			return m.updateTail(msg)
 		}
 
 	case beadsInitDoneMsg:
@@ -481,11 +477,6 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textarea.Blink
 		}
 
-	case "t":
-		m.view = viewTail
-		m.tail.scrollOffset = 0
-		return m, nil
-
 	case "a":
 		if st == nil || m.interrupting {
 			return m, nil
@@ -512,39 +503,6 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return claudeExitMsg{err: err}
 		})
-	}
-
-	return m, nil
-}
-
-func (m Model) updateTail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	st := m.orch.Get(m.selectedID)
-	lineCount := 0
-	if st != nil {
-		lineCount = len(st.GetOutputLines())
-	}
-
-	switch msg.String() {
-	case "esc", "q":
-		m.view = viewDetail
-		return m, nil
-
-	case "j", "down":
-		if m.tail.scrollOffset > 0 {
-			m.tail.scrollOffset--
-		}
-
-	case "k", "up":
-		maxScroll := lineCount - 5
-		if maxScroll < 0 {
-			maxScroll = 0
-		}
-		if m.tail.scrollOffset < maxScroll {
-			m.tail.scrollOffset++
-		}
-
-	case "G":
-		m.tail.scrollOffset = 0
 	}
 
 	return m, nil
@@ -805,10 +763,6 @@ func (m Model) View() string {
 			content += "\n" + helpStyle.Render(m.statusMsg)
 		}
 		return clipLines(content, m.width)
-
-	case viewTail:
-		st := m.orch.Get(m.selectedID)
-		return renderTail(st, m.tail, m.width, m.height)
 
 	default:
 		return ""
