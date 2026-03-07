@@ -3,8 +3,15 @@ You are drafting a plan for a software task. Write or revise plan.md in the work
 
 Task: {{.Task}}
 
+Planning guidelines:
+- Start with one simple case end-to-end. Don't implement all variations at once. Pick the simplest case and wire it through every layer, then expand.
+- Order changes chronologically. Each step should follow the order a human would think about the feature.
+- Keep commits small. Each commit is one logical step. A step shouldn't touch more layers than necessary.
+- Batch remaining work by implementation similarity. After the first case works end-to-end, group remaining items by what they have in common.
+- Write tests alongside changes. Each step includes the tests relevant to that step's changes.
+
 Rules:
-- Write a clear, step-by-step implementation plan.
+- Write a clear, step-by-step implementation plan in plan.md.
 - Do not write code. Do not commit.
 - Do not create beads issues — that's the review step's job.
 {{- else -}}
