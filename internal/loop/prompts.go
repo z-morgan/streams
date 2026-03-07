@@ -55,6 +55,28 @@ func LoadPrompt(phase, step string, data PromptData) (string, error) {
 	return renderTemplate(name, string(content), data)
 }
 
+// ListPromptNames returns the names of all embedded prompt templates (without .tmpl extension).
+func ListPromptNames() []string {
+	entries, _ := embeddedPrompts.ReadDir("prompts")
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, ".tmpl") {
+			names = append(names, strings.TrimSuffix(name, ".tmpl"))
+		}
+	}
+	return names
+}
+
+// ExportPrompt returns the raw content of an embedded prompt template.
+func ExportPrompt(name string) (string, error) {
+	content, err := embeddedPrompts.ReadFile("prompts/" + name + ".tmpl")
+	if err != nil {
+		return "", fmt.Errorf("unknown prompt template: %s", name)
+	}
+	return string(content), nil
+}
+
 func renderTemplate(name, content string, data PromptData) (string, error) {
 	tmpl, err := template.New(name).Parse(content)
 	if err != nil {

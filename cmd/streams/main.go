@@ -25,6 +25,10 @@ func main() {
 }
 
 func run() int {
+	if len(os.Args) > 1 && os.Args[1] == "prompts" {
+		return runPrompts(os.Args[2:])
+	}
+
 	headless := flag.Bool("headless", false, "run a single stream without TUI")
 	task := flag.String("task", "", "task description (required in headless mode)")
 	dir := flag.String("dir", ".", "working directory")
@@ -155,6 +159,32 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 	default:
 		slog.Warn("max iterations reached", "max", maxIterations)
 		return 2
+	}
+}
+
+func runPrompts(args []string) int {
+	fs := flag.NewFlagSet("prompts", flag.ExitOnError)
+	list := fs.Bool("list", false, "list all prompt template names")
+	export := fs.String("export", "", "print the default template to stdout")
+	fs.Parse(args)
+
+	switch {
+	case *list:
+		for _, name := range loop.ListPromptNames() {
+			fmt.Println(name)
+		}
+		return 0
+	case *export != "":
+		content, err := loop.ExportPrompt(*export)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Print(content)
+		return 0
+	default:
+		fmt.Fprintln(os.Stderr, "usage: streams prompts --list | --export <name>")
+		return 1
 	}
 }
 
