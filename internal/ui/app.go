@@ -13,6 +13,18 @@ import (
 	"github.com/zmorgan/streams/internal/stream"
 )
 
+// PipelinePreset defines a named pipeline option for the new stream picker.
+type PipelinePreset struct {
+	Label    string
+	Pipeline []string
+}
+
+var pipelinePresets = []PipelinePreset{
+	{"plan + code", []string{"plan", "coding"}},
+	{"full", []string{"plan", "decompose", "coding"}},
+	{"code only", []string{"coding"}},
+}
+
 type clearStatusMsg struct{}
 
 // view tracks which view is active.
@@ -51,8 +63,9 @@ type Model struct {
 	deleteTargetID    string
 
 	// Beads init prompt state.
-	showBeadsInit bool
-	pendingTask   string // task stashed while waiting for stealth answer
+	showBeadsInit   bool
+	pendingTask     string   // task stashed while waiting for stealth answer
+	pendingPipeline []string // pipeline stashed while waiting for stealth answer
 
 	// Attach state.
 	interrupting        bool // true while waiting for Interrupt to finish
@@ -189,9 +202,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		task := m.pendingTask
+		pipeline := m.pendingPipeline
 		orch := m.orch
 		return m, func() tea.Msg {
-			st, err := orch.Create(task)
+			st, err := orch.Create(task, pipeline)
 			return streamCreatedMsg{stream: st, err: err}
 		}
 
@@ -488,7 +502,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.creating = true
 			orch := m.orch
 			return m, func() tea.Msg {
-				st, err := orch.Create(task)
+				st, err := orch.Create(task, nil)
 				return streamCreatedMsg{stream: st, err: err}
 			}
 		}

@@ -121,7 +121,8 @@ func (o *Orchestrator) InitBeads(stealth bool) error {
 }
 
 // Create creates a new stream backed by a beads parent issue and git worktree.
-func (o *Orchestrator) Create(task string) (*stream.Stream, error) {
+// If pipeline is nil/empty, the global config pipeline is used.
+func (o *Orchestrator) Create(task string, pipeline []string) (*stream.Stream, error) {
 	repoDir := o.config.RepoDir
 
 	parentID, err := createBeadsParent(task, repoDir)
@@ -142,7 +143,9 @@ func (o *Orchestrator) Create(task string) (*stream.Stream, error) {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
-	pipeline := o.config.Pipeline
+	if len(pipeline) == 0 {
+		pipeline = o.config.Pipeline
+	}
 	if len(pipeline) == 0 {
 		pipeline = []string{"coding"}
 	}
@@ -220,8 +223,10 @@ func (o *Orchestrator) Start(id string) error {
 	o.done[id] = doneCh
 	o.mu.Unlock()
 
-	// Clear any previous error on resume.
+	// Clear any previous error on resume and assign a fresh session ID so we
+	// don't collide with a stale Claude CLI process from a previous run.
 	st.SetLastError(nil)
+	st.SetSessionID(newUUID())
 
 	rt := &runtime.BudgetRuntime{
 		Inner:     &claude.Runtime{WorkDir: st.WorkTree},
