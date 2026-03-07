@@ -71,9 +71,9 @@ func (m *mockGit) CommitsBetween(_, _, toSHA string) ([]string, error) {
 // mockPhase is a minimal MacroPhase for testing.
 type mockPhase struct{}
 
-func (p *mockPhase) Name() string                          { return "test" }
-func (p *mockPhase) ImplementPrompt(_ PhaseContext) string { return "implement" }
-func (p *mockPhase) ReviewPrompt(_ PhaseContext) string    { return "review" }
+func (p *mockPhase) Name() string                                    { return "test" }
+func (p *mockPhase) ImplementPrompt(_ PhaseContext) (string, error) { return "implement", nil }
+func (p *mockPhase) ReviewPrompt(_ PhaseContext) (string, error)    { return "review", nil }
 func (p *mockPhase) ImplementTools() []string              { return []string{"Bash"} }
 func (p *mockPhase) ReviewTools() []string                 { return []string{"Bash"} }
 func (p *mockPhase) IsConverged(r IterationResult) bool {

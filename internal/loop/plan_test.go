@@ -20,7 +20,10 @@ func TestPlanPhase_ImplementPromptFirstIteration(t *testing.T) {
 		Stream:    &stream.Stream{Task: "build a widget", BeadsParentID: "parent-1"},
 		Iteration: 0,
 	}
-	prompt := p.ImplementPrompt(ctx)
+	prompt, err := p.ImplementPrompt(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(prompt, "drafting a plan") {
 		t.Error("expected first-iteration prompt to contain 'drafting a plan'")
@@ -39,7 +42,10 @@ func TestPlanPhase_ImplementPromptSubsequentIteration(t *testing.T) {
 		Stream:    &stream.Stream{Task: "build a widget", BeadsParentID: "parent-1"},
 		Iteration: 1,
 	}
-	prompt := p.ImplementPrompt(ctx)
+	prompt, err := p.ImplementPrompt(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(prompt, "revising a plan") {
 		t.Error("expected subsequent-iteration prompt to contain 'revising a plan'")
@@ -54,7 +60,10 @@ func TestPlanPhase_ReviewPrompt(t *testing.T) {
 	ctx := PhaseContext{
 		Stream: &stream.Stream{Task: "build a widget", BeadsParentID: "parent-1"},
 	}
-	prompt := p.ReviewPrompt(ctx)
+	prompt, err := p.ReviewPrompt(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(prompt, "reviewing a plan") {
 		t.Error("expected review prompt to contain 'reviewing a plan'")

@@ -78,13 +78,16 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
-		implPrompt := phase.ImplementPrompt(pctx)
+		implPrompt, err := phase.ImplementPrompt(pctx)
+		if err != nil {
+			recordError(s, phase, stream.ErrInfra, stream.StepImplement, "failed to load implement prompt", err.Error())
+			return
+		}
 		if len(pendingGuidance) > 0 {
 			implPrompt = appendGuidanceSection(implPrompt, pendingGuidance)
 		}
 
 		implReq := buildRequest(implPrompt, phase.ImplementTools())
-		implReq.SessionID = s.GetSessionID()
 		implReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		implResp, err := rt.Run(ctx, implReq)
 		if err != nil {
@@ -132,7 +135,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// --- StepReview ---
 		s.SetIterStep(stream.StepReview)
 
-		reviewReq := buildRequest(phase.ReviewPrompt(pctx), phase.ReviewTools())
+		reviewPrompt, err := phase.ReviewPrompt(pctx)
+		if err != nil {
+			recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to load review prompt", err.Error())
+			return
+		}
+		reviewReq := buildRequest(reviewPrompt, phase.ReviewTools())
 		reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		reviewResp, err := rt.Run(ctx, reviewReq)
 		if err != nil {

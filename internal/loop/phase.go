@@ -49,13 +49,22 @@ type IterationResult struct {
 // MacroPhase defines the behavior for one phase of the stream pipeline.
 type MacroPhase interface {
 	Name() string
-	ImplementPrompt(ctx PhaseContext) string
-	ReviewPrompt(ctx PhaseContext) string
+	ImplementPrompt(ctx PhaseContext) (string, error)
+	ReviewPrompt(ctx PhaseContext) (string, error)
 	ImplementTools() []string
 	ReviewTools() []string
 	IsConverged(result IterationResult) bool
 	BeforeReview(ctx PhaseContext) error
 	TransitionMode() Transition
+}
+
+func promptDataFromContext(ctx PhaseContext) PromptData {
+	return PromptData{
+		Task:         ctx.Stream.Task,
+		ParentID:     ctx.Stream.BeadsParentID,
+		Iteration:    ctx.Iteration,
+		OrderedSteps: ctx.OrderedSteps,
+	}
 }
 
 // NewPhase returns a MacroPhase for the given pipeline phase name.

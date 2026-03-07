@@ -20,7 +20,10 @@ func TestDecomposePhase_ImplementPromptFirstIteration(t *testing.T) {
 		Stream:    &stream.Stream{Task: "build a widget", BeadsParentID: "parent-1"},
 		Iteration: 0,
 	}
-	prompt := d.ImplementPrompt(ctx)
+	prompt, err := d.ImplementPrompt(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(prompt, "breaking a plan") {
 		t.Error("expected first-iteration prompt to contain 'breaking a plan'")
@@ -39,7 +42,10 @@ func TestDecomposePhase_ImplementPromptSubsequentIteration(t *testing.T) {
 		Stream:    &stream.Stream{Task: "build a widget", BeadsParentID: "parent-1"},
 		Iteration: 1,
 	}
-	prompt := d.ImplementPrompt(ctx)
+	prompt, err := d.ImplementPrompt(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(prompt, "revising the decomposition") {
 		t.Error("expected subsequent-iteration prompt to contain 'revising the decomposition'")
@@ -54,7 +60,10 @@ func TestDecomposePhase_ReviewPrompt(t *testing.T) {
 	ctx := PhaseContext{
 		Stream: &stream.Stream{BeadsParentID: "parent-1"},
 	}
-	prompt := d.ReviewPrompt(ctx)
+	prompt, err := d.ReviewPrompt(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(prompt, "reviewing the decomposition") {
 		t.Error("expected review prompt to contain 'reviewing the decomposition'")
