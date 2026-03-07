@@ -12,6 +12,7 @@ import (
 type detailView struct {
 	iterCursor   int
 	tailScroll   int
+	focusRight   bool
 	contentWidth int // layout width captured on entry; 0 = not yet set
 }
 
@@ -110,14 +111,14 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
 			rightWidth = 10
 		}
 
-		left := renderIterationList(rows, dv.iterCursor, leftWidth)
+		left := renderIterationList(rows, dv.iterCursor, leftWidth, dv.focusRight)
 
 		var right string
 		cursor := dv.iterCursor
 		if cursor >= 0 && cursor < len(rows) {
 			row := rows[cursor]
 			if row.IsInProgress {
-				right = renderTailContent(st, rightWidth, height-4)
+				right = renderTailContent(st, rightWidth, height-4, dv.tailScroll)
 				if row.IsPaused {
 					right += "\n" + helpStyle.Render("(paused)")
 				}
@@ -130,12 +131,16 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("j/k: iterations  a: attach  s: start  x: stop  g: guidance  q/esc: back"))
+	help := "j/k: iterations  enter: focus output  a: attach  s: start  x: stop  g: guidance  q/esc: back"
+	if dv.focusRight {
+		help = "j/k: scroll  G: bottom  esc: back to list"
+	}
+	b.WriteString(helpStyle.Render(help))
 
 	return b.String()
 }
 
-func renderIterationList(rows []iterationRow, cursor int, width int) string {
+func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool) string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Iterations"))
 	b.WriteString("\n")
@@ -153,7 +158,9 @@ func renderIterationList(rows []iterationRow, cursor int, width int) string {
 			label += " !"
 		}
 
-		if i == cursor {
+		if dimmed {
+			b.WriteString(snapshotNormalStyle.Render("  " + label))
+		} else if i == cursor {
 			b.WriteString(snapshotSelectedStyle.Render("> " + label))
 		} else {
 			b.WriteString(snapshotNormalStyle.Render("  " + label))

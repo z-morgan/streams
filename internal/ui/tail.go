@@ -1,12 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/zmorgan/streams/internal/stream"
 )
 
-func renderTailContent(st *stream.Stream, width, availableHeight int) string {
+func renderTailContent(st *stream.Stream, width, availableHeight, scrollOffset int) string {
 	lines := st.GetOutputLines()
 	if len(lines) == 0 {
 		return helpStyle.Render("No output yet.")
@@ -16,13 +17,20 @@ func renderTailContent(st *stream.Stream, width, availableHeight int) string {
 		availableHeight = 5
 	}
 
-	startIdx := len(lines) - availableHeight
+	endIdx := len(lines) - scrollOffset
+	if endIdx < 0 {
+		endIdx = 0
+	}
+	if endIdx > len(lines) {
+		endIdx = len(lines)
+	}
+	startIdx := endIdx - availableHeight
 	if startIdx < 0 {
 		startIdx = 0
 	}
 
 	var b strings.Builder
-	for i := startIdx; i < len(lines); i++ {
+	for i := startIdx; i < endIdx; i++ {
 		line := lines[i]
 		if strings.HasPrefix(line, "> ") {
 			b.WriteString(toolLineStyle.Render(line))
@@ -31,5 +39,12 @@ func renderTailContent(st *stream.Stream, width, availableHeight int) string {
 		}
 		b.WriteString("\n")
 	}
+
+	if scrollOffset > 0 {
+		indicator := fmt.Sprintf("-- %d lines below --", scrollOffset)
+		b.WriteString(helpStyle.Render(indicator))
+		b.WriteString("\n")
+	}
+
 	return b.String()
 }
