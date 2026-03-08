@@ -43,13 +43,8 @@ The user can shift between gears at any time. A stream might start in pairing (t
 - Loop continues until the user explicitly stops or pauses the stream
 - If the loop converges (refinements stop improving), surface this to the user
 
-### R3: Quality Gates
-The key differentiator. Gates go beyond functional correctness:
-- **Pattern conformance** — does this match how the codebase already does things?
-- **Simplicity** — can anything be removed or consolidated?
-- **Readability** — would a new developer understand this without comments?
-- **Hindsight check** — "knowing what I know now, would I approach this differently?"
-- Gates are configurable (the user should be able to tune what the agent evaluates)
+### R3: Quality Evaluation
+The review agent evaluates quality directly via its prompt criteria (pattern conformance, simplicity, readability, correctness, hindsight) and files actionable beads for any issues found.
 
 ### R4: User Interaction
 - **Observe** — view the latest snapshot of any stream without interrupting the agent

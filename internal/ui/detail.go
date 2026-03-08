@@ -95,14 +95,8 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 	var b strings.Builder
 
 	// Header
-	header := fmt.Sprintf("%s  [%s]  %s  iter %d",
-		st.Name, st.GetStatus(), currentPhase(st), st.GetIteration())
-	if st.GetStatus() == stream.StatusRunning {
-		step := st.GetIterStep()
-		if step == stream.StepImplement || step == stream.StepReview {
-			header += " · " + step.String()
-		}
-	}
+	header := fmt.Sprintf("%s  %s  iter %d",
+		st.Name, currentPhase(st), st.GetIteration())
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
@@ -146,6 +140,8 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 			}
 		}
 
+		right = detailStatusMarker(st) + "\n" + right
+
 		b.WriteString(joinPanes(left, right, leftWidth, paneHeight))
 	}
 
@@ -171,6 +167,29 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 	b.WriteString(helpStyle.Render(help))
 
 	return b.String()
+}
+
+func detailStatusMarker(st *stream.Stream) string {
+	status := st.GetStatus()
+	name := status.String()
+
+	if status == stream.StatusPaused && st.GetLastError() != nil {
+		return lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("[! Error]")
+	}
+
+	label := name
+	if status == stream.StatusRunning {
+		step := st.GetIterStep()
+		if step == stream.StepImplement || step == stream.StepReview {
+			label += " · " + step.String()
+		}
+	}
+
+	color, ok := statusColors[name]
+	if !ok {
+		color = colorMuted
+	}
+	return lipgloss.NewStyle().Foreground(color).Render("[" + label + "]")
 }
 
 func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool, spinnerFrame string) string {
@@ -245,19 +264,6 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 		b.WriteString("\n")
 		b.WriteString(snap.DiffStat)
 		b.WriteString("\n\n")
-	}
-
-	if len(snap.GateResults) > 0 {
-		b.WriteString(labelStyle.Render("Gates"))
-		b.WriteString("\n")
-		for _, g := range snap.GateResults {
-			mark := "+"
-			if !g.Passed {
-				mark = "-"
-			}
-			b.WriteString(fmt.Sprintf("  [%s] %s\n", mark, g.Gate))
-		}
-		b.WriteString("\n")
 	}
 
 	if snap.CostUSD > 0 {

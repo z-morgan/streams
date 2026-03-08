@@ -36,7 +36,6 @@ internal/
   loop/plan.go                         — Plan macro-phase implementation
   loop/decompose.go                    — Decompose macro-phase implementation
   loop/coding.go                       — Coding macro-phase implementation
-  loop/gates.go                        — Quality gate interface + defaults
   loop/errors.go                       — LoopError type + ErrorKind enum
   orchestrator/orchestrator.go         — Multi-stream manager
   ui/app.go                            — Root Bubble Tea model
@@ -168,7 +167,6 @@ type Snapshot struct {
     Iteration   int
     Summary     string       // CLI result text — final text output from claude -p --output-format json
     Review      string       // reviewer's text output
-    GateResults []GateResult // per-gate pass/fail + detail
     CostUSD     float64
     DiffStat    string       // git diff --stat output (coding phase only)
     CommitSHAs  []string     // commits made this iteration (coding phase only)
@@ -470,29 +468,6 @@ This keeps ordering logic in Go (deterministic) rather than relying on the agent
 > - Do not file issues for missing features outside the task scope.
 > - Maximum 5 issues per review.
 
-### Quality Gates
-
-```go
-// internal/loop/gates.go
-
-type GateResult struct {
-    Gate   string
-    Passed bool
-    Detail string
-}
-
-type Gate interface {
-    Name() string
-    Evaluate(reviewText string) GateResult
-}
-```
-
-Default gates (parsed from review output):
-- **Pattern conformance** — does this match how the codebase already does things?
-- **Simplicity** — can anything be removed or consolidated?
-- **Readability** — would a new developer understand this without comments?
-- **Hindsight check** — knowing what I know now, would I approach this differently?
-
 **Convergence detection** is performed by the Go loop, not by parsing agent output. The loop counts open children before and after each review step via `bd show <parent> --children --status=open`. If the count did not increase, the phase has converged — the review found nothing to improve. The loop passes these counts to `MacroPhase.IsConverged(result)` via `IterationResult`, and the phase sets the stream's `Converged` flag. The "No further improvements needed" string in review prompts is guidance to the agent (so it doesn't hallucinate issues when satisfied), not a signal parsed by Go. The loop does not auto-stop — it either transitions to the next macro-phase or pauses for human input depending on mode.
 
 ### Error Handling
@@ -673,7 +648,7 @@ Responsibilities:
 | View | Purpose |
 |------|---------|
 | **Dashboard** | Stream list with cursor. One row per stream: name, current phase, iteration count. Minimal — scan status at a glance. |
-| **Detail** | Two-pane layout. Left pane: vertical list of all snapshots across all phases (e.g., "Plan 1", "Plan 2", "Coding 1"...). Right pane: selected snapshot's details (summary, review, diffstat, gates). v1 highlights the latest snapshot; future adds j/k traversal of the left pane. |
+| **Detail** | Two-pane layout. Left pane: vertical list of all snapshots across all phases (e.g., "Plan 1", "Plan 2", "Coding 1"...). Right pane: selected snapshot's details (summary, review, diffstat, beads delta). v1 highlights the latest snapshot; future adds j/k traversal of the left pane. |
 | **Guidance overlay** | Textarea overlay triggered by `g`. Submit with `ctrl+s`, cancel with `esc`. |
 
 ### Key Bindings

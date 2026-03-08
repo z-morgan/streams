@@ -10,8 +10,7 @@ type Snapshot struct {
 	Summary          string       // implement step's text output
 	Review           string       // review step's text output
 	Artifact         string       // contents of phase artifact file (e.g. plan.md) captured after implement
-	GateResults      []GateResult // per-gate pass/fail + detail
-	CostUSD          float64
+	CostUSD float64
 	DiffStat         string   // git diff --stat output (coding phase only)
 	CommitSHAs       []string // commits made this iteration (coding phase only)
 	BeadsClosed      []string // bead IDs closed by implement step
@@ -27,9 +26,3 @@ type Guidance struct {
 	Timestamp time.Time
 }
 
-// GateResult records one quality gate's evaluation from a review step.
-type GateResult struct {
-	Gate   string
-	Passed bool
-	Detail string
-}

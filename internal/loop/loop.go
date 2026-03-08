@@ -176,12 +176,6 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// --- StepCheckpoint ---
 		s.SetIterStep(stream.StepCheckpoint)
 
-		// Evaluate quality gates against review text.
-		var gateResults []stream.GateResult
-		for _, gate := range DefaultGates() {
-			gateResults = append(gateResults, gate.Evaluate(reviewResp.Text))
-		}
-
 		diffStat, _ := git.DiffStat(s.WorkTree, headBefore)
 		commitSHAs, _ := git.CommitsBetween(s.WorkTree, headBefore, headAfterImpl)
 
@@ -204,7 +198,6 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			CommitSHAs:       commitSHAs,
 			BeadsClosed:      beadsClosed,
 			BeadsOpened:      beadsOpened,
-			GateResults:      gateResults,
 			GuidanceConsumed: pendingGuidance,
 			Timestamp:        time.Now(),
 		}
