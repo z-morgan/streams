@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/zmorgan/streams/internal/config"
 	"github.com/zmorgan/streams/internal/loop"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/runtime"
@@ -32,10 +34,10 @@ func run() int {
 	headless := flag.Bool("headless", false, "run a single stream without TUI")
 	task := flag.String("task", "", "task description (required in headless mode)")
 	dir := flag.String("dir", ".", "working directory")
-	maxIterations := flag.Int("max-iterations", 10, "maximum iteration count")
-	maxBudget := flag.String("max-budget-per-step", "2.00", "max USD budget per CLI invocation")
+	flag.Int("max-iterations", 0, "maximum iteration count")
+	flag.String("max-budget-per-step", "", "max USD budget per CLI invocation (\"0\" to disable)")
 	dataDir := flag.String("data-dir", "", "directory for stream data (default: <dir>/.streams)")
-	pipeline := flag.String("pipeline", "coding", "comma-separated pipeline phases (e.g. research,plan,decompose,coding)")
+	flag.String("pipeline", "", "comma-separated pipeline phases (e.g. research,plan,decompose,coding)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -52,18 +54,35 @@ func run() int {
 		storeRoot = filepath.Join(workDir, ".streams")
 	}
 
+	// Load persistent config (defaults ← user ← project ← CLI flags).
+	fileCfg := config.Load(storeRoot)
+	cliOverrides := flagOverrides()
+	cfg := config.Merge(fileCfg, cliOverrides)
+
 	var pipelinePhases []string
-	for _, p := range strings.Split(*pipeline, ",") {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			pipelinePhases = append(pipelinePhases, p)
+	if cfg.Pipeline != nil {
+		for _, p := range strings.Split(*cfg.Pipeline, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				pipelinePhases = append(pipelinePhases, p)
+			}
 		}
+	}
+
+	maxIterations := 10
+	if cfg.MaxIterations != nil {
+		maxIterations = *cfg.MaxIterations
+	}
+
+	budgetUSD := ""
+	if cfg.BudgetEnabled() {
+		budgetUSD = *cfg.MaxBudgetPerStep
 	}
 
 	s := &store.Store{Root: storeRoot}
 	orch := orchestrator.New(s, orchestrator.Config{
-		MaxIterations: *maxIterations,
-		MaxBudgetUSD:  *maxBudget,
+		MaxIterations: maxIterations,
+		MaxBudgetUSD:  budgetUSD,
 		RepoDir:       workDir,
 		Pipeline:      pipelinePhases,
 	})
@@ -74,7 +93,7 @@ func run() int {
 	}
 
 	if *headless {
-		return runHeadless(orch, workDir, *task, *maxIterations, *maxBudget)
+		return runHeadless(orch, workDir, *task, maxIterations, budgetUSD)
 	}
 
 	return runTUI(orch, storeRoot)
@@ -131,9 +150,9 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 		cancel()
 	}()
 
-	rt := &runtime.BudgetRuntime{
-		Inner:     &claude.Runtime{WorkDir: st.WorkTree},
-		MaxBudget: maxBudget,
+	var rt runtime.Runtime = &claude.Runtime{WorkDir: st.WorkTree}
+	if maxBudget != "" {
+		rt = &runtime.BudgetRuntime{Inner: rt, MaxBudget: maxBudget}
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
 	git := &loop.CLIGitQuerier{}
@@ -186,6 +205,28 @@ func runPrompts(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: streams prompts --list | --export <name>")
 		return 1
 	}
+}
+
+// flagOverrides builds a config.Config from only the CLI flags that were
+// explicitly set by the user. Unset flags produce nil fields so they don't
+// override file-based config.
+func flagOverrides() config.Config {
+	var cfg config.Config
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "max-budget-per-step":
+			v := f.Value.String()
+			cfg.MaxBudgetPerStep = &v
+		case "max-iterations":
+			if n, err := strconv.Atoi(f.Value.String()); err == nil {
+				cfg.MaxIterations = &n
+			}
+		case "pipeline":
+			v := f.Value.String()
+			cfg.Pipeline = &v
+		}
+	})
+	return cfg
 }
 
 func resolveDir(dir string) (string, error) {

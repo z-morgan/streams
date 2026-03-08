@@ -228,9 +228,9 @@ func (o *Orchestrator) Start(id string) error {
 	st.SetLastError(nil)
 	st.SetSessionID(newUUID())
 
-	rt := &runtime.BudgetRuntime{
-		Inner:     &claude.Runtime{WorkDir: st.WorkTree},
-		MaxBudget: o.config.MaxBudgetUSD,
+	var rt runtime.Runtime = &claude.Runtime{WorkDir: st.WorkTree}
+	if o.config.MaxBudgetUSD != "" {
+		rt = &runtime.BudgetRuntime{Inner: rt, MaxBudget: o.config.MaxBudgetUSD}
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
 	git := &loop.CLIGitQuerier{}
