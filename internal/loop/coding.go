@@ -1,9 +1,13 @@
 package loop
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
+
+	"github.com/zmorgan/streams/internal/runtime"
 )
 
 func (p *CodingPhase) ImplementPrompt(ctx PhaseContext) (string, error) {
@@ -70,18 +74,40 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	cmd.Dir = ctx.WorkDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// Abort the failed rebase to leave the worktree in a clean state.
+		rebaseOutput := string(out)
+		slog.Info("autosquash failed, attempting agent resolution", "stream", ctx.Stream.ID)
+
+		// Try agent-based conflict resolution before aborting.
+		agentErr := p.runRebaseAgent(context.Background(), ctx, rebaseOutput)
+		if agentErr == nil {
+			// Agent resolved conflicts — check that rebase actually completed.
+			if !isRebaseInProgress(ctx.WorkDir) {
+				if dirty {
+					pop := exec.Command("git", "stash", "pop")
+					pop.Dir = ctx.WorkDir
+					if popOut, err := pop.CombinedOutput(); err != nil {
+						return fmt.Errorf("autosquash succeeded (agent) but stash pop failed: %s", popOut)
+					}
+				}
+				slog.Info("rebase agent resolved conflicts", "stream", ctx.Stream.ID)
+				return nil
+			}
+			agentErr = fmt.Errorf("agent finished but rebase still in progress")
+		}
+
+		slog.Warn("rebase agent failed, aborting", "stream", ctx.Stream.ID, "err", agentErr)
+
+		// Fall back: abort and restore.
 		abort := exec.Command("git", "rebase", "--abort")
 		abort.Dir = ctx.WorkDir
 		_ = abort.Run()
 
-		// Restore stashed changes even on rebase failure.
 		if dirty {
 			pop := exec.Command("git", "stash", "pop")
 			pop.Dir = ctx.WorkDir
 			_ = pop.Run()
 		}
-		return fmt.Errorf("autosquash rebase failed: %s", out)
+		return fmt.Errorf("autosquash rebase failed (agent could not resolve): %s", rebaseOutput)
 	}
 
 	// Restore stashed changes after successful rebase.
@@ -94,6 +120,40 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	}
 
 	return nil
+}
+
+// runRebaseAgent invokes a Claude agent to resolve autosquash rebase conflicts.
+func (p *CodingPhase) runRebaseAgent(ctx context.Context, pctx PhaseContext, rebaseOutput string) error {
+	data := promptDataFromContext(pctx)
+	data.RebaseOutput = rebaseOutput
+
+	prompt, err := LoadPrompt("coding", "rebase", data)
+	if err != nil {
+		return fmt.Errorf("failed to load rebase prompt: %w", err)
+	}
+
+	rt := &runtime.BudgetRuntime{Inner: pctx.Runtime, MaxBudget: "0.50"}
+
+	req := buildRequest(prompt, p.ImplementTools())
+	req.OnOutput = func(line string) { pctx.Stream.AppendOutput(line) }
+
+	_, err = rt.Run(ctx, req)
+	return err
+}
+
+// isRebaseInProgress checks whether a git rebase is still in progress.
+func isRebaseInProgress(workDir string) bool {
+	cmd := exec.Command("git", "rev-parse", "--git-path", "rebase-merge")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	// git rev-parse --git-path returns the path; check if the directory exists.
+	path := strings.TrimSpace(string(out))
+	check := exec.Command("test", "-d", path)
+	check.Dir = workDir
+	return check.Run() == nil
 }
 
 func (p *CodingPhase) TransitionMode() Transition {
