@@ -32,3 +32,5 @@ func (p *PlanPhase) BeforeReview(_ PhaseContext) error {
 func (p *PlanPhase) TransitionMode() Transition {
 	return TransitionAutoAdvance
 }
+
+func (p *PlanPhase) ArtifactFile() string { return "plan.md" }

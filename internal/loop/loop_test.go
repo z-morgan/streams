@@ -81,6 +81,7 @@ func (p *mockPhase) IsConverged(r IterationResult) bool {
 }
 func (p *mockPhase) BeforeReview(_ PhaseContext) error { return nil }
 func (p *mockPhase) TransitionMode() Transition        { return TransitionPause }
+func (p *mockPhase) ArtifactFile() string              { return "" }
 
 // mockAutoAdvancePhase returns TransitionAutoAdvance to test pipeline advancement.
 type mockAutoAdvancePhase struct{ mockPhase }

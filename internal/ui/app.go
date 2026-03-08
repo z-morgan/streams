@@ -518,6 +518,9 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textarea.Blink
 		}
 
+	case "f":
+		m.detail.showArtifact = !m.detail.showArtifact
+
 	case "a":
 		if st == nil || m.interrupting {
 			return m, nil

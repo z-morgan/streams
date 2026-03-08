@@ -32,3 +32,5 @@ func (r *ResearchPhase) BeforeReview(_ PhaseContext) error {
 func (r *ResearchPhase) TransitionMode() Transition {
 	return TransitionAutoAdvance
 }
+
+func (r *ResearchPhase) ArtifactFile() string { return "research.md" }

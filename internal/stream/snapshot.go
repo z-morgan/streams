@@ -9,6 +9,7 @@ type Snapshot struct {
 	Iteration        int
 	Summary          string       // implement step's text output
 	Review           string       // review step's text output
+	Artifact         string       // contents of phase artifact file (e.g. plan.md) captured after implement
 	GateResults      []GateResult // per-gate pass/fail + detail
 	CostUSD          float64
 	DiffStat         string   // git diff --stat output (coding phase only)

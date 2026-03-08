@@ -32,3 +32,5 @@ func (d *DecomposePhase) BeforeReview(_ PhaseContext) error {
 func (d *DecomposePhase) TransitionMode() Transition {
 	return TransitionAutoAdvance
 }
+
+func (d *DecomposePhase) ArtifactFile() string { return "" }

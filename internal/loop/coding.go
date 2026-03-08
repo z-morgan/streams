@@ -99,3 +99,5 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 func (p *CodingPhase) TransitionMode() Transition {
 	return TransitionPause
 }
+
+func (p *CodingPhase) ArtifactFile() string { return "" }

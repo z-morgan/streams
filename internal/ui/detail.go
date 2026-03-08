@@ -13,7 +13,8 @@ type detailView struct {
 	iterCursor   int
 	tailScroll   int
 	focusRight   bool
-	contentWidth int // layout width captured on entry; 0 = not yet set
+	showArtifact bool // toggle between snapshot summary and artifact file
+	contentWidth int  // layout width captured on entry; 0 = not yet set
 }
 
 func (d *detailView) clampCursor(count int) {
@@ -84,7 +85,7 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 	return rows
 }
 
-func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
+func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFrame string) string {
 	if st == nil {
 		return "No stream selected."
 	}
@@ -96,6 +97,14 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
 		st.Name, st.GetStatus(), currentPhase(st), st.GetIteration())
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
+
+	// Available height for the two-pane area:
+	// header (text + border + margin) = 3 lines, plus explicit \n = 4 lines
+	// footer (\n + help line) = 2 lines
+	paneHeight := height - 6
+	if paneHeight < 5 {
+		paneHeight = 5
+	}
 
 	rows := buildIterationList(st)
 	snaps := st.GetSnapshots()
@@ -111,23 +120,25 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
 			rightWidth = 10
 		}
 
-		left := renderIterationList(rows, dv.iterCursor, leftWidth, dv.focusRight)
+		left := renderIterationList(rows, dv.iterCursor, leftWidth, dv.focusRight, spinnerFrame)
 
 		var right string
 		cursor := dv.iterCursor
 		if cursor >= 0 && cursor < len(rows) {
 			row := rows[cursor]
 			if row.IsInProgress {
-				right = renderTailContent(st, rightWidth, height-4, dv.tailScroll)
+				right = renderTailContent(st, rightWidth, paneHeight, dv.tailScroll)
 				if row.IsPaused {
 					right += "\n" + helpStyle.Render("(paused)")
 				}
+			} else if dv.showArtifact && row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
+				right = renderArtifactDetail(snaps, row.SnapshotIndex, rightWidth)
 			} else {
 				right = renderSnapshotDetail(snaps, row.SnapshotIndex, rightWidth)
 			}
 		}
 
-		b.WriteString(joinPanes(left, right, leftWidth))
+		b.WriteString(joinPanes(left, right, leftWidth, paneHeight))
 	}
 
 	b.WriteString("\n")
@@ -135,12 +146,26 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int) string {
 	if dv.focusRight {
 		help = "j/k: scroll  G: bottom  esc: back to list"
 	}
+	// Show artifact toggle hint when the selected snapshot has an artifact
+	if !dv.focusRight {
+		cursor := dv.iterCursor
+		if cursor >= 0 && cursor < len(rows) {
+			row := rows[cursor]
+			if row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
+				if dv.showArtifact {
+					help += "  f: show summary"
+				} else {
+					help += "  f: show " + snaps[row.SnapshotIndex].Phase + ".md"
+				}
+			}
+		}
+	}
 	b.WriteString(helpStyle.Render(help))
 
 	return b.String()
 }
 
-func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool) string {
+func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool, spinnerFrame string) string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Iterations"))
 	b.WriteString("\n")
@@ -151,7 +176,7 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 			if row.IsPaused {
 				label += " (paused)"
 			} else {
-				label = "> " + label + "..."
+				label = spinnerFrame + " " + label
 			}
 		}
 		if row.HasError {
@@ -230,6 +255,19 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 	return b.String()
 }
 
+func renderArtifactDetail(snaps []stream.Snapshot, cursor int, width int) string {
+	if cursor < 0 || cursor >= len(snaps) {
+		return ""
+	}
+	snap := snaps[cursor]
+
+	var b strings.Builder
+	b.WriteString(labelStyle.Render(snap.Phase + ".md"))
+	b.WriteString("\n")
+	b.WriteString(wrapText(snap.Artifact, width))
+	return b.String()
+}
+
 func renderErrorBlock(err *stream.LoopError) string {
 	msg := fmt.Sprintf("Error [%s at %s]: %s", err.Kind, err.Step, err.Message)
 	if err.Detail != "" {
@@ -238,17 +276,20 @@ func renderErrorBlock(err *stream.LoopError) string {
 	return errorBlockStyle.Render(msg)
 }
 
-func joinPanes(left, right string, leftWidth int) string {
+func joinPanes(left, right string, leftWidth, maxLines int) string {
 	leftLines := strings.Split(left, "\n")
 	rightLines := strings.Split(right, "\n")
 
-	maxLines := len(leftLines)
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
+	lineCount := len(leftLines)
+	if len(rightLines) > lineCount {
+		lineCount = len(rightLines)
+	}
+	if maxLines > 0 && lineCount > maxLines {
+		lineCount = maxLines
 	}
 
 	var b strings.Builder
-	for i := 0; i < maxLines; i++ {
+	for i := 0; i < lineCount; i++ {
 		l := ""
 		if i < len(leftLines) {
 			l = leftLines[i]

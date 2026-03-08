@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -183,11 +185,20 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		diffStat, _ := git.DiffStat(s.WorkTree, headBefore)
 		commitSHAs, _ := git.CommitsBetween(s.WorkTree, headBefore, headAfterImpl)
 
+		var artifact string
+		if af := phase.ArtifactFile(); af != "" {
+			data, err := os.ReadFile(filepath.Join(s.WorkTree, af))
+			if err == nil {
+				artifact = string(data)
+			}
+		}
+
 		snap := stream.Snapshot{
 			Phase:            phase.Name(),
 			Iteration:        iteration,
 			Summary:          implResp.Text,
 			Review:           reviewResp.Text,
+			Artifact:         artifact,
 			CostUSD:          implResp.CostUSD + reviewResp.CostUSD,
 			DiffStat:         diffStat,
 			CommitSHAs:       commitSHAs,

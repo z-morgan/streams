@@ -56,6 +56,7 @@ type MacroPhase interface {
 	IsConverged(result IterationResult) bool
 	BeforeReview(ctx PhaseContext) error
 	TransitionMode() Transition
+	ArtifactFile() string // relative path to the phase's artifact file (empty if none)
 }
 
 func promptDataFromContext(ctx PhaseContext) PromptData {
