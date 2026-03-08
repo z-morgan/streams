@@ -123,11 +123,14 @@ type Model struct {
 
 	// New stream overlay state.
 	showNewStream     bool
+	newStreamTitle    textarea.Model
 	newStreamInput    textarea.Model
-	newStreamStep     int             // 0 = task input, 1 = phase picker
-	newStreamPhaseCur int             // cursor into flattened phase list
-	newStreamChecked  map[string]bool // which phases are checked
-	creating          bool            // true while orch.Create is running
+	newStreamStep        int             // 0 = title input, 1 = task input, 2 = phase picker, 3 = breakpoint picker
+	newStreamPhaseCur    int             // cursor into flattened phase list
+	newStreamChecked     map[string]bool // which phases are checked
+	newStreamBreakpoints map[int]bool    // which pipeline gaps have breakpoints
+	newStreamBPCursor    int             // cursor into breakpoint gaps
+	creating             bool            // true while orch.Create is running
 
 	// Delete confirmation overlay state.
 	showDeleteConfirm bool
@@ -135,8 +138,10 @@ type Model struct {
 
 	// Beads init prompt state.
 	showBeadsInit   bool
-	pendingTask     string   // task stashed while waiting for stealth answer
-	pendingPipeline []string // pipeline stashed while waiting for stealth answer
+	pendingTitle       string   // title stashed while waiting for stealth answer
+	pendingTask        string   // task stashed while waiting for stealth answer
+	pendingPipeline    []string // pipeline stashed while waiting for stealth answer
+	pendingBreakpoints []int   // breakpoints stashed while waiting for stealth answer
 
 	// Attach state.
 	interrupting        bool // true while waiting for Interrupt to finish
@@ -186,6 +191,14 @@ func New(orch *orchestrator.Orchestrator) Model {
 	ti.Placeholder = "Enter guidance for this stream..."
 	ti.CharLimit = 1000
 
+	titleInput := textarea.New()
+	titleInput.Placeholder = "Enter a title..."
+	titleInput.Prompt = ""
+	titleInput.CharLimit = 100
+	titleInput.ShowLineNumbers = false
+	titleInput.SetHeight(1)
+	titleInput.MaxHeight = 0
+
 	ni := textarea.New()
 	ni.Placeholder = "Describe the task..."
 	ni.Prompt = ""
@@ -198,6 +211,7 @@ func New(orch *orchestrator.Orchestrator) Model {
 		orch:           orch,
 		view:           viewDashboard,
 		guidanceInput:  ti,
+		newStreamTitle: titleInput,
 		newStreamInput: ni,
 	}
 }
@@ -289,11 +303,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = "Error initializing beads: " + msg.err.Error()
 			return m, nil
 		}
+		title := m.pendingTitle
 		task := m.pendingTask
 		pipeline := m.pendingPipeline
+		breakpoints := m.pendingBreakpoints
 		orch := m.orch
 		return m, func() tea.Msg {
-			st, err := orch.Create(task, pipeline)
+			st, err := orch.Create(title, task, pipeline, breakpoints)
 			return streamCreatedMsg{stream: st, err: err}
 		}
 
@@ -393,9 +409,11 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.showNewStream = true
 		m.newStreamStep = 0
+		m.newStreamTitle.Reset()
+		m.newStreamTitle.SetWidth(m.inputWidth())
+		m.newStreamTitle.Focus()
 		m.newStreamInput.Reset()
 		m.newStreamInput.SetWidth(m.inputWidth())
-		m.newStreamInput.Focus()
 		m.newStreamChecked = defaultPhaseChecks(m.orch.DefaultPipeline())
 		m.newStreamPhaseCur = 0
 		return m, textarea.Blink
@@ -585,7 +603,10 @@ func (m Model) updateDetailFocusRight(msg tea.KeyMsg, st *stream.Stream) (tea.Mo
 }
 
 func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.newStreamStep == 1 {
+	if m.newStreamStep == 3 {
+		return m.updateNewStreamBreakpoints(msg)
+	}
+	if m.newStreamStep == 2 {
 		return m.updateNewStreamPipeline(msg)
 	}
 
@@ -593,17 +614,37 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
+			if m.newStreamStep == 1 {
+				m.newStreamStep = 0
+				m.newStreamTitle.Focus()
+				return m, textarea.Blink
+			}
 			m.showNewStream = false
 			return m, nil
 
 		case "ctrl+n":
+			if m.newStreamStep == 0 {
+				title := m.newStreamTitle.Value()
+				if title == "" {
+					return m, nil
+				}
+				m.newStreamStep = 1
+				m.newStreamInput.Focus()
+				return m, textarea.Blink
+			}
 			task := m.newStreamInput.Value()
 			if task == "" {
 				return m, nil
 			}
-			m.newStreamStep = 1
+			m.newStreamStep = 2
 			return m, nil
 		}
+	}
+
+	if m.newStreamStep == 0 {
+		var cmd tea.Cmd
+		m.newStreamTitle, cmd = m.newStreamTitle.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -618,8 +659,9 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			m.newStreamStep = 0
-			return m, nil
+			m.newStreamStep = 1
+			m.newStreamInput.Focus()
+			return m, textarea.Blink
 
 		case "j", "down":
 			if m.newStreamPhaseCur < len(flat)-1 {
@@ -655,25 +697,79 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(pipeline) == 0 {
 				return m, nil
 			}
-			task := m.newStreamInput.Value()
-			m.showNewStream = false
-			m.newStreamStep = 0
-			if m.orch.NeedsBeadsInit() {
-				m.pendingTask = task
-				m.pendingPipeline = pipeline
-				m.showBeadsInit = true
+			if len(pipeline) > 1 {
+				m.newStreamStep = 3
+				m.newStreamBreakpoints = make(map[int]bool)
+				m.newStreamBPCursor = 0
 				return m, nil
 			}
-			m.creating = true
-			orch := m.orch
-			return m, func() tea.Msg {
-				st, err := orch.Create(task, pipeline)
-				return streamCreatedMsg{stream: st, err: err}
-			}
+			return m.createStream(pipeline, nil)
 		}
 	}
 
 	return m, nil
+}
+
+func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
+	pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
+	gapCount := len(pipeline) - 1
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.newStreamStep = 2
+			return m, nil
+
+		case "j", "down":
+			if m.newStreamBPCursor < gapCount-1 {
+				m.newStreamBPCursor++
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.newStreamBPCursor > 0 {
+				m.newStreamBPCursor--
+			}
+			return m, nil
+
+		case " ":
+			m.newStreamBreakpoints[m.newStreamBPCursor] = !m.newStreamBreakpoints[m.newStreamBPCursor]
+			return m, nil
+
+		case "enter":
+			var breakpoints []int
+			for i := 0; i < gapCount; i++ {
+				if m.newStreamBreakpoints[i] {
+					breakpoints = append(breakpoints, i)
+				}
+			}
+			return m.createStream(pipeline, breakpoints)
+		}
+	}
+
+	return m, nil
+}
+
+func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, tea.Cmd) {
+	title := m.newStreamTitle.Value()
+	task := m.newStreamInput.Value()
+	m.showNewStream = false
+	m.newStreamStep = 0
+	if m.orch.NeedsBeadsInit() {
+		m.pendingTitle = title
+		m.pendingTask = task
+		m.pendingPipeline = pipeline
+		m.pendingBreakpoints = breakpoints
+		m.showBeadsInit = true
+		return m, nil
+	}
+	m.creating = true
+	orch := m.orch
+	return m, func() tea.Msg {
+		st, err := orch.Create(title, task, pipeline, breakpoints)
+		return streamCreatedMsg{stream: st, err: err}
+	}
 }
 
 func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -696,6 +792,7 @@ func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			m.showBeadsInit = false
+			m.pendingTitle = ""
 			m.pendingTask = ""
 			return m, nil
 		}
@@ -791,7 +888,7 @@ func (m Model) View() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamBreakpoints, m.newStreamBPCursor, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -847,16 +944,50 @@ func (m Model) View() string {
 	}
 }
 
-func renderNewStreamOverlay(ti textarea.Model, step, phaseCursor int, checked map[string]bool, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, breakpoints map[int]bool, bpCursor int, width, height int) string {
 	var overlay string
 
-	if step == 0 {
+	switch step {
+	case 0:
 		overlay = titleStyle.Render("New Stream") + "\n\n"
-		overlay += ti.View() + "\n\n"
+		overlay += "Title:\n"
+		overlay += titleInput.View() + "\n\n"
 		overlay += helpStyle.Render("ctrl+n: next  esc: cancel")
-	} else {
+	case 1:
 		overlay = titleStyle.Render("New Stream") + "\n\n"
-		overlay += helpStyle.Render("Task: "+ti.Value()) + "\n\n"
+		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n\n"
+		overlay += "Task:\n"
+		overlay += taskInput.View() + "\n\n"
+		overlay += helpStyle.Render("ctrl+n: next  esc: back")
+	case 3:
+		pipeline := selectedPipeline(checked, phaseTree)
+		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
+		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
+		overlay += "Set breakpoints (pause between phases):\n\n"
+		for i, name := range pipeline {
+			overlay += "  " + name + "\n"
+			if i < len(pipeline)-1 {
+				cursor := "  "
+				if i == bpCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				check := "[ ]"
+				if breakpoints[i] {
+					check = "[x]"
+				}
+				label := fmt.Sprintf("── %s pause after %s ──", check, name)
+				if i == bpCursor {
+					label = selectedRowStyle.Render(label)
+				}
+				overlay += cursor + label + "\n"
+			}
+		}
+		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
+	default:
+		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
+		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
 		overlay += "Phases:\n"
 		flat := flattenPhaseTree(phaseTree, 0)
 		for i, fp := range flat {
@@ -875,7 +1006,7 @@ func renderNewStreamOverlay(ti textarea.Model, step, phaseCursor int, checked ma
 			}
 			overlay += cursor + indent + check + label + "\n"
 		}
-		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
+		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: next  esc: back")
 	}
 
 	maxWidth := width - 6

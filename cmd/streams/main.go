@@ -138,7 +138,7 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 		return 1
 	}
 
-	st, err := orch.Create(task, nil)
+	st, err := orch.Create(task, task, nil, nil)
 	if err != nil {
 		slog.Error("failed to create stream", "err", err)
 		return 1
@@ -304,4 +304,3 @@ func resolveDir(dir string) (string, error) {
 	}
 	return abs, nil
 }
-

@@ -58,7 +58,7 @@ type Orchestrator struct {
 	streams map[string]*stream.Stream
 	cancels map[string]context.CancelFunc
 	done    map[string]chan struct{} // closed when loop goroutine exits
-	snaps   map[string]int          // persisted snapshot count per stream
+	snaps   map[string]int           // persisted snapshot count per stream
 	store   *store.Store
 	sink    EventSink
 	config  Config
@@ -122,10 +122,10 @@ func (o *Orchestrator) InitBeads(stealth bool) error {
 
 // Create creates a new stream backed by a beads parent issue and git worktree.
 // If pipeline is nil/empty, the global config pipeline is used.
-func (o *Orchestrator) Create(task string, pipeline []string) (*stream.Stream, error) {
+func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int) (*stream.Stream, error) {
 	repoDir := o.config.RepoDir
 
-	parentID, err := createBeadsParent(task, repoDir)
+	parentID, err := createBeadsParent(title, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("create beads parent: %w", err)
 	}
@@ -156,12 +156,13 @@ func (o *Orchestrator) Create(task string, pipeline []string) (*stream.Stream, e
 
 	st := &stream.Stream{
 		ID:            streamID,
-		Name:          task,
+		Name:          title,
 		Task:          task,
 		Mode:          stream.ModeAutonomous,
 		Status:        stream.StatusCreated,
 		Pipeline:      pipeline,
 		PipelineIndex: 0,
+		Breakpoints:   breakpoints,
 		BeadsParentID: parentID,
 		BaseSHA:       baseSHA,
 		Branch:        branch,
