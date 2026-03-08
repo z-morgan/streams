@@ -31,6 +31,9 @@ func TestPlanPhase_ImplementPromptFirstIteration(t *testing.T) {
 	if !strings.Contains(prompt, "build a widget") {
 		t.Error("expected prompt to contain task description")
 	}
+	if !strings.Contains(prompt, "research.md") {
+		t.Error("expected first-iteration prompt to reference research.md")
+	}
 	if strings.Contains(prompt, "parent-1") {
 		t.Error("first-iteration prompt should not reference parent ID")
 	}

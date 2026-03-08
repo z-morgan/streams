@@ -5,7 +5,7 @@ Parent issue: {{.ParentID}}
 
 Steps:
 1. Read plan.md.
-2. Evaluate: Is the plan complete? Are steps well-ordered? Are there gaps, ambiguities, or unnecessary complexity?
+2. Evaluate: Is the plan complete? Are steps well-ordered? Are there gaps, ambiguities, or unnecessary complexity? Does the sequence of steps tell a clear story — could a human reviewer follow the narrative of changes from start to finish?
 3. For each improvement, file a child issue:
    bd create --parent {{.ParentID}} --title="<specific action>" --type=task --priority=2 --description="<what to change and why>"
 4. If the plan is ready, respond with exactly: "No further improvements needed."
