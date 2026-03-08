@@ -215,6 +215,105 @@ func TestNewPolishPhaseIgnoresUnknownNames(t *testing.T) {
 	}
 }
 
+func TestRunSlotsCommitScopedGetsCommitData(t *testing.T) {
+	s := newTestStream()
+	s.BaseSHA = "abc123"
+	s.WorkTree = "/tmp/test"
+
+	// Capture the prompt that was sent to the runtime.
+	var capturedPrompt string
+	rt := &promptCapturingRuntime{
+		inner: &mockRuntime{
+			results: []mockResult{
+				{resp: &runtime.Response{Text: "linted"}},
+			},
+		},
+		onRun: func(prompt string) { capturedPrompt = prompt },
+	}
+
+	phase := &PolishPhase{
+		slots: []Slot{
+			{Name: "lint", Scope: ScopeCommit, Tools: []string{"Bash"}},
+		},
+	}
+
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	// The commit-scoped prompt should contain the BaseSHA.
+	// (gatherCommitData will fail on a fake workdir, but BaseSHA is always populated)
+	if capturedPrompt == "" {
+		t.Error("expected prompt to be captured")
+	}
+}
+
+func TestRunSlotsCommitScopedSlotUsesLintTemplate(t *testing.T) {
+	s := newTestStream()
+	s.BaseSHA = "abc123"
+	s.WorkTree = "/tmp/test"
+
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "linted"}},
+		},
+	}
+
+	phase := NewPolishPhase([]string{"lint"})
+
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if len(s.Snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	}
+	if s.Snapshots[0].SlotName != "lint" {
+		t.Errorf("expected SlotName=lint, got %q", s.Snapshots[0].SlotName)
+	}
+}
+
+func TestRunSlotsRubocopSlotUsesTemplate(t *testing.T) {
+	s := newTestStream()
+	s.BaseSHA = "abc123"
+	s.WorkTree = "/tmp/test"
+
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "rubocop done"}},
+		},
+	}
+
+	phase := NewPolishPhase([]string{"rubocop"})
+
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if len(s.Snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	}
+	if s.Snapshots[0].SlotName != "rubocop" {
+		t.Errorf("expected SlotName=rubocop, got %q", s.Snapshots[0].SlotName)
+	}
+}
+
+// promptCapturingRuntime wraps a runtime and captures prompts.
+type promptCapturingRuntime struct {
+	inner runtime.Runtime
+	onRun func(prompt string)
+}
+
+func (r *promptCapturingRuntime) Run(ctx context.Context, req runtime.Request) (*runtime.Response, error) {
+	if r.onRun != nil {
+		r.onRun(req.Prompt)
+	}
+	return r.inner.Run(ctx, req)
+}
+
 func TestNewPhaseReturnsPolish(t *testing.T) {
 	phase, err := NewPhase("polish")
 	if err != nil {

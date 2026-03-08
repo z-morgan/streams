@@ -1,0 +1,22 @@
+You are running RuboCop checks on the commits in a completed stream.
+
+Task: {{.Task}}
+Base SHA: {{.BaseSHA}}
+
+## Commits
+{{.Commits}}
+
+Instructions:
+1. Check for a Gemfile and .rubocop.yml in the project root.
+2. If either is missing, this is not a Ruby project — report that and exit without making changes.
+3. Ensure RuboCop is available (run `bundle exec rubocop --version`). If not, exit.
+4. For each commit above, identify the Ruby files that were changed.
+5. Run `bundle exec rubocop <files>` on those files.
+6. For any auto-correctable violations, run `bundle exec rubocop -A <files>` and create a fixup commit (`git commit --fixup=<SHA>`) targeting the commit that introduced them.
+7. For non-auto-correctable violations, fix them manually and create fixup commits.
+8. Only fix violations in files changed by the stream's commits.
+
+Rules:
+- Create fixup commits, not regular commits.
+- Do not modify commit messages or reorder commits.
+- If all Ruby code passes RuboCop, do nothing.

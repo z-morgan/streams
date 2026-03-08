@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -66,7 +67,8 @@ func buildSlotPrompt(slot Slot, ctx PhaseContext) (string, error) {
 	baseSHA := ctx.Stream.BaseSHA
 
 	if workDir != "" && baseSHA != "" {
-		if slot.Scope == ScopeDiff {
+		switch slot.Scope {
+		case ScopeDiff:
 			cmd := exec.Command("git", "log", "--oneline", baseSHA+"..HEAD")
 			cmd.Dir = workDir
 			if out, err := cmd.Output(); err == nil {
@@ -78,8 +80,25 @@ func buildSlotPrompt(slot Slot, ctx PhaseContext) (string, error) {
 			if out, err := cmd.Output(); err == nil {
 				data.DiffStat = strings.TrimSpace(string(out))
 			}
+		case ScopeCommit:
+			commits, err := gatherCommitData(workDir, baseSHA)
+			if err == nil {
+				data.Commits = commits
+			}
 		}
 	}
 
 	return LoadPrompt("polish", slot.Name, data)
+}
+
+// gatherCommitData formats per-commit sections (SHA, message, diff) for
+// commit-scoped polish slots.
+func gatherCommitData(workDir, baseSHA string) (string, error) {
+	cmd := exec.Command("git", "log", "--reverse", "--format=COMMIT %H%n%s%n%b", "-p", baseSHA+"..HEAD")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git log failed: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

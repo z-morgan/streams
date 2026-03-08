@@ -430,19 +430,30 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 			s.SetSessionID(resp.SessionID)
 		}
 
+		// Run autosquash after commit-scoped slots to collapse fixup commits
+		// before the next slot sees history.
+		var autosquashErr string
+		if slot.Scope == ScopeCommit && s.WorkTree != "" && s.BaseSHA != "" {
+			if err := autosquash(s.WorkTree, s.BaseSHA); err != nil {
+				autosquashErr = err.Error()
+				slog.Warn("autosquash failed after polish slot", "stream", s.ID, "slot", slot.Name, "err", err)
+			}
+		}
+
 		headAfter, _ := git.HeadSHA(s.WorkTree)
 		diffStat, _ := git.DiffStat(s.WorkTree, headBefore)
 		commitSHAs, _ := git.CommitsBetween(s.WorkTree, headBefore, headAfter)
 
 		snap := stream.Snapshot{
-			Phase:      phase.Name(),
-			Iteration:  i,
-			SlotName:   slot.Name,
-			Summary:    resp.Text,
-			CostUSD:    resp.CostUSD,
-			DiffStat:   diffStat,
-			CommitSHAs: commitSHAs,
-			Timestamp:  time.Now(),
+			Phase:         phase.Name(),
+			Iteration:     i,
+			SlotName:      slot.Name,
+			Summary:       resp.Text,
+			CostUSD:       resp.CostUSD,
+			DiffStat:      diffStat,
+			CommitSHAs:    commitSHAs,
+			AutosquashErr: autosquashErr,
+			Timestamp:     time.Now(),
 		}
 		s.AppendSnapshot(snap)
 		if onCheckpoint != nil {

@@ -1,0 +1,20 @@
+You are running linter checks on the commits in a completed stream.
+
+Task: {{.Task}}
+Base SHA: {{.BaseSHA}}
+
+## Commits
+{{.Commits}}
+
+Instructions:
+1. Detect the project's linter by looking for configuration files (e.g., .eslintrc, .pylintrc, .golangci.yml, Makefile lint targets, package.json scripts).
+2. If no linter is detected, report that and exit without making changes.
+3. For each commit above, check the changed files for linter violations.
+4. Fix any violations by creating fixup commits (`git commit --fixup=<SHA>`) targeting the commit that introduced them.
+5. Only fix violations in files that were changed by the stream's commits — do not fix pre-existing violations in untouched files.
+
+Rules:
+- Create fixup commits, not regular commits.
+- Do not modify commit messages or reorder commits.
+- If the linter is not installed, try to install it first. If installation fails, report the issue and exit.
+- If all code passes the linter, do nothing.
