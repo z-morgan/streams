@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -26,6 +27,7 @@ type streamData struct {
 	Status        string    `json:"status"`
 	Pipeline      []string  `json:"pipeline"`
 	PipelineIndex int       `json:"pipeline_index"`
+	Breakpoints   []int    `json:"breakpoints,omitempty"`
 	IterStep      string    `json:"iter_step"`
 	Iteration     int       `json:"iteration"`
 	Converged     bool      `json:"converged"`
@@ -129,7 +131,8 @@ func (s *Store) LoadAll() ([]*stream.Stream, error) {
 		}
 		st, err := s.Load(entry.Name())
 		if err != nil {
-			return nil, fmt.Errorf("load stream %s: %w", entry.Name(), err)
+			slog.Warn("skipping corrupt stream directory", "id", entry.Name(), "err", err)
+			continue
 		}
 		streams = append(streams, st)
 	}
@@ -185,6 +188,7 @@ func toStreamData(st *stream.Stream) streamData {
 		Status:        st.GetStatus().String(),
 		Pipeline:      st.Pipeline,
 		PipelineIndex: st.PipelineIndex,
+		Breakpoints:   st.Breakpoints,
 		IterStep:      st.IterStep.String(),
 		Iteration:     st.GetIteration(),
 		Converged:     st.Converged,
@@ -222,6 +226,7 @@ func fromStreamData(d streamData) *stream.Stream {
 		Mode:          parseMode(d.Mode),
 		Pipeline:      d.Pipeline,
 		PipelineIndex: d.PipelineIndex,
+		Breakpoints:   d.Breakpoints,
 		IterStep:      parseIterStep(d.IterStep),
 		Converged:     d.Converged,
 		BeadsParentID: d.BeadsParentID,
