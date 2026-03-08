@@ -27,8 +27,13 @@ func main() {
 }
 
 func run() int {
-	if len(os.Args) > 1 && os.Args[1] == "prompts" {
-		return runPrompts(os.Args[2:])
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "prompts":
+			return runPrompts(os.Args[2:])
+		case "config":
+			return runConfig(os.Args[2:])
+		}
 	}
 
 	headless := flag.Bool("headless", false, "run a single stream without TUI")
@@ -205,6 +210,59 @@ func runPrompts(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: streams prompts --list | --export <name>")
 		return 1
 	}
+}
+
+func runConfig(args []string) int {
+	dir := "."
+	dataDir := ""
+	storeRoot := func() string {
+		workDir, err := resolveDir(dir)
+		if err != nil {
+			return ".streams"
+		}
+		if dataDir != "" {
+			return dataDir
+		}
+		return filepath.Join(workDir, ".streams")
+	}
+
+	// "streams config" with no args — show effective config.
+	if len(args) == 0 {
+		cfg := config.Load(storeRoot())
+		fmt.Print(config.Format(cfg))
+		return 0
+	}
+
+	// "streams config set [--global] <key> <value>"
+	if args[0] == "set" {
+		fs := flag.NewFlagSet("config set", flag.ExitOnError)
+		global := fs.Bool("global", false, "operate on user-level config (~/.config/streams/config.toml)")
+		fs.Parse(args[1:])
+
+		remaining := fs.Args()
+		if len(remaining) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: streams config set [--global] <key> <value>")
+			return 1
+		}
+		key, value := remaining[0], remaining[1]
+
+		var path string
+		if *global {
+			path = config.UserConfigPath()
+		} else {
+			path = config.ProjectConfigPath(storeRoot())
+		}
+
+		if err := config.SetInFile(path, key, value); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("set %s = %q in %s\n", key, value, path)
+		return 0
+	}
+
+	fmt.Fprintln(os.Stderr, "usage: streams config [set [--global] <key> <value>]")
+	return 1
 }
 
 // flagOverrides builds a config.Config from only the CLI flags that were
