@@ -28,6 +28,7 @@ var phaseTree = []PhaseNode{
 	}},
 	{Name: "coding"},
 	{Name: "review"},
+	{Name: "polish"},
 }
 
 // flatPhase is a flattened view of the phase tree for cursor navigation.
@@ -123,9 +124,9 @@ type Model struct {
 	guidanceInput textarea.Model
 
 	// New stream overlay state.
-	showNewStream     bool
-	newStreamTitle    textarea.Model
-	newStreamInput    textarea.Model
+	showNewStream        bool
+	newStreamTitle       textarea.Model
+	newStreamInput       textarea.Model
 	newStreamStep        int             // 0 = title input, 1 = task input, 2 = phase picker, 3 = breakpoint picker
 	newStreamPhaseCur    int             // cursor into flattened phase list
 	newStreamChecked     map[string]bool // which phases are checked
@@ -138,11 +139,11 @@ type Model struct {
 	deleteTargetID    string
 
 	// Beads init prompt state.
-	showBeadsInit   bool
+	showBeadsInit      bool
 	pendingTitle       string   // title stashed while waiting for stealth answer
 	pendingTask        string   // task stashed while waiting for stealth answer
 	pendingPipeline    []string // pipeline stashed while waiting for stealth answer
-	pendingBreakpoints []int   // breakpoints stashed while waiting for stealth answer
+	pendingBreakpoints []int    // breakpoints stashed while waiting for stealth answer
 
 	// Complete overlay state (review phase).
 	showComplete  bool

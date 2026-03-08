@@ -27,6 +27,7 @@ type Config struct {
 	MaxBudgetPerStep *string // nil = not set, "" or "0" = disabled
 	MaxIterations    *int    // nil = not set
 	Pipeline         *string // nil = not set
+	PolishSlots      *string // nil = use built-in defaults; comma-separated slot names
 }
 
 // Defaults returns the built-in default configuration.
@@ -88,6 +89,9 @@ func merge(layers ...Config) Config {
 		}
 		if layer.Pipeline != nil {
 			result.Pipeline = layer.Pipeline
+		}
+		if layer.PolishSlots != nil {
+			result.PolishSlots = layer.PolishSlots
 		}
 	}
 	return result
@@ -162,6 +166,8 @@ func parse(r *os.File) Config {
 			}
 		case "pipeline":
 			cfg.Pipeline = &value
+		case "polish-slots":
+			cfg.PolishSlots = &value
 		}
 	}
 	return cfg
@@ -204,6 +210,9 @@ func WriteFile(path string, cfg Config) error {
 	if cfg.Pipeline != nil {
 		fmt.Fprintf(&buf, "pipeline = %q\n", *cfg.Pipeline)
 	}
+	if cfg.PolishSlots != nil {
+		fmt.Fprintf(&buf, "polish-slots = %q\n", *cfg.PolishSlots)
+	}
 	return os.WriteFile(path, []byte(buf.String()), 0o644)
 }
 
@@ -222,6 +231,8 @@ func SetInFile(path, key, value string) error {
 		cfg.MaxIterations = &n
 	case "pipeline":
 		cfg.Pipeline = &value
+	case "polish-slots":
+		cfg.PolishSlots = &value
 	default:
 		return fmt.Errorf("unknown config key: %q", key)
 	}
@@ -244,10 +255,13 @@ func Format(cfg Config) string {
 	if cfg.Pipeline != nil {
 		fmt.Fprintf(&buf, "pipeline = %q\n", *cfg.Pipeline)
 	}
+	if cfg.PolishSlots != nil {
+		fmt.Fprintf(&buf, "polish-slots = %q\n", *cfg.PolishSlots)
+	}
 	return buf.String()
 }
 
 // ValidKeys returns the list of recognized config keys.
 func ValidKeys() []string {
-	return []string{"max-budget-per-step", "max-iterations", "pipeline"}
+	return []string{"max-budget-per-step", "max-iterations", "pipeline", "polish-slots"}
 }

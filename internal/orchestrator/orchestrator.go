@@ -50,6 +50,7 @@ type Config struct {
 	MaxBudgetUSD  string
 	RepoDir       string   // the main repository directory
 	Pipeline      []string // ordered macro-phase names; defaults to ["coding"]
+	PolishSlots   []string // nil = use built-in defaults; explicit list replaces defaults
 }
 
 // Orchestrator manages the lifecycle of multiple streams.
@@ -241,8 +242,9 @@ func (o *Orchestrator) Start(id string) error {
 	}
 	beads := &loop.CLIBeadsQuerier{WorkDir: st.WorkTree}
 	git := &loop.CLIGitQuerier{}
+	factory := o.phaseFactory()
 	phaseName := st.Pipeline[st.PipelineIndex]
-	phase, err := loop.NewPhase(phaseName)
+	phase, err := factory(phaseName)
 	if err != nil {
 		return fmt.Errorf("create phase %q: %w", phaseName, err)
 	}
@@ -252,7 +254,7 @@ func (o *Orchestrator) Start(id string) error {
 	go func() {
 		defer close(doneCh)
 
-		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, loop.NewPhase, func(s *stream.Stream) {
+		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, factory, func(s *stream.Stream) {
 			o.checkpoint(s)
 			o.emit(Event{StreamID: s.ID, Kind: EventCheckpoint})
 		})
@@ -493,6 +495,17 @@ func (o *Orchestrator) emit(e Event) {
 	o.mu.RUnlock()
 	if sink != nil {
 		go sink.Send(e)
+	}
+}
+
+// phaseFactory returns a PhaseFactory that handles config-driven phases.
+func (o *Orchestrator) phaseFactory() loop.PhaseFactory {
+	polishSlots := o.config.PolishSlots
+	return func(name string) (loop.MacroPhase, error) {
+		if name == "polish" {
+			return loop.NewPolishPhase(polishSlots), nil
+		}
+		return loop.NewPhase(name)
 	}
 }
 

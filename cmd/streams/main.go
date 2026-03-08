@@ -84,12 +84,23 @@ func run() int {
 		budgetUSD = *cfg.MaxBudgetPerStep
 	}
 
+	var polishSlots []string
+	if cfg.PolishSlots != nil {
+		for _, slot := range strings.Split(*cfg.PolishSlots, ",") {
+			slot = strings.TrimSpace(slot)
+			if slot != "" {
+				polishSlots = append(polishSlots, slot)
+			}
+		}
+	}
+
 	s := &store.Store{Root: storeRoot}
 	orch := orchestrator.New(s, orchestrator.Config{
 		MaxIterations: maxIterations,
 		MaxBudgetUSD:  budgetUSD,
 		RepoDir:       workDir,
 		Pipeline:      pipelinePhases,
+		PolishSlots:   polishSlots,
 	})
 
 	if err := orch.LoadExisting(); err != nil {

@@ -168,8 +168,8 @@ func TestRenderChannel(t *testing.T) {
 func TestFlattenPhaseTree(t *testing.T) {
 	flat := flattenPhaseTree(phaseTree, 0)
 
-	if len(flat) != 5 {
-		t.Fatalf("expected 5 flat phases, got %d", len(flat))
+	if len(flat) != 6 {
+		t.Fatalf("expected 6 flat phases, got %d", len(flat))
 	}
 
 	if flat[0].Name != "research" || flat[0].Depth != 0 {
@@ -186,6 +186,9 @@ func TestFlattenPhaseTree(t *testing.T) {
 	}
 	if flat[4].Name != "review" || flat[4].Depth != 0 {
 		t.Errorf("flat[4] = %+v, want review depth 0", flat[4])
+	}
+	if flat[5].Name != "polish" || flat[5].Depth != 0 {
+		t.Errorf("flat[5] = %+v, want polish depth 0", flat[5])
 	}
 }
 
