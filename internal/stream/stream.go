@@ -60,6 +60,7 @@ const (
 	StatusRunning
 	StatusPaused
 	StatusStopped
+	StatusCompleted
 )
 
 var statusNames = [...]string{
@@ -67,6 +68,7 @@ var statusNames = [...]string{
 	"Running",
 	"Paused",
 	"Stopped",
+	"Completed",
 }
 
 func (s Status) String() string {
@@ -166,6 +168,20 @@ func (s *Stream) GetSessionID() string {
 	id := s.SessionID
 	s.mu.RUnlock()
 	return id
+}
+
+func (s *Stream) SetBranch(branch string) {
+	s.mu.Lock()
+	s.Branch = branch
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) SetWorkTree(path string) {
+	s.mu.Lock()
+	s.WorkTree = path
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
 }
 
 func (s *Stream) SetLastError(err *LoopError) {

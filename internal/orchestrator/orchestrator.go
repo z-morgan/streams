@@ -370,6 +370,79 @@ func (o *Orchestrator) Delete(id string, cleanup bool) error {
 	return nil
 }
 
+// Complete finalizes a stream by renaming its branch, removing the worktree,
+// and setting status to StatusCompleted.
+func (o *Orchestrator) Complete(id, branchName string) error {
+	o.mu.Lock()
+	st := o.streams[id]
+	if st == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q not found", id)
+	}
+	if _, running := o.cancels[id]; running {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q is still running — stop it first", id)
+	}
+	oldBranch := st.Branch
+	worktree := st.WorkTree
+	o.mu.Unlock()
+
+	// Rename the worktree branch to the user-chosen name.
+	cmd := exec.Command("git", "branch", "-m", oldBranch, branchName)
+	cmd.Dir = o.config.RepoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch rename: %s", strings.TrimSpace(string(out)))
+	}
+
+	// Remove the worktree.
+	cmd = exec.Command("git", "worktree", "remove", worktree, "--force")
+	cmd.Dir = o.config.RepoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree remove: %s", strings.TrimSpace(string(out)))
+	}
+
+	st.SetBranch(branchName)
+	st.SetWorkTree("")
+	st.SetStatus(stream.StatusCompleted)
+
+	o.checkpoint(st)
+	return nil
+}
+
+// Revise resets a paused stream to an earlier pipeline phase with optional feedback,
+// then restarts it. The current code state is preserved — no commits are reverted.
+func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) error {
+	o.mu.Lock()
+	st := o.streams[id]
+	if st == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q not found", id)
+	}
+	if _, running := o.cancels[id]; running {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q is still running — stop it first", id)
+	}
+	o.mu.Unlock()
+
+	currentIdx := st.GetPipelineIndex()
+	if targetPhaseIndex < 0 || targetPhaseIndex >= currentIdx {
+		return fmt.Errorf("target phase index %d must be less than current index %d", targetPhaseIndex, currentIdx)
+	}
+
+	st.SetPipelineIndex(targetPhaseIndex)
+	st.SetConverged(false)
+	st.SetIteration(0)
+
+	if feedback != "" {
+		st.AddGuidance(stream.Guidance{
+			Text:      feedback,
+			Timestamp: time.Now(),
+		})
+	}
+
+	return o.Start(id)
+}
+
 // SendGuidance queues a guidance message for a stream.
 func (o *Orchestrator) SendGuidance(id string, text string) error {
 	st := o.Get(id)

@@ -170,17 +170,24 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to load review prompt", err.Error())
 			return
 		}
-		reviewReq := buildRequest(reviewPrompt, phase.ReviewTools())
-		reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
-		reviewResp, err := rt.Run(ctx, reviewReq)
-		if err != nil {
-			if ctx.Err() != nil {
-				s.SetStatus(stream.StatusStopped)
+
+		var reviewResp *runtime.Response
+		if reviewPrompt == "" {
+			// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
+			reviewResp = &runtime.Response{}
+		} else {
+			reviewReq := buildRequest(reviewPrompt, phase.ReviewTools())
+			reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
+			reviewResp, err = rt.Run(ctx, reviewReq)
+			if err != nil {
+				if ctx.Err() != nil {
+					s.SetStatus(stream.StatusStopped)
+					return
+				}
+				kind := classifyError(err)
+				recordError(s, phase, kind, stream.StepReview, "review step failed", err.Error())
 				return
 			}
-			kind := classifyError(err)
-			recordError(s, phase, kind, stream.StepReview, "review step failed", err.Error())
-			return
 		}
 
 		idsAfterReview, err := beads.ListOpenChildren(s.BeadsParentID)

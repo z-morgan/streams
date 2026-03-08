@@ -458,3 +458,38 @@ func TestRunConvergesWhenAllBeadsAlreadyClosed(t *testing.T) {
 		t.Errorf("expected no error, got %v", s.LastError)
 	}
 }
+
+// mockNoReviewPhase returns "" from ReviewPrompt to test review-skip behavior.
+type mockNoReviewPhase struct{ mockPhase }
+
+func (p *mockNoReviewPhase) ReviewPrompt(_ PhaseContext) (string, error) { return "", nil }
+
+func TestRunSkipsReviewWhenPromptEmpty(t *testing.T) {
+	s := newTestStream()
+	rt := &mockRuntime{
+		results: []mockResult{
+			// Only the implement step should call the runtime.
+			{resp: &runtime.Response{Text: "implemented"}},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
+
+	Run(context.Background(), s, &mockNoReviewPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	// Runtime should have been called exactly once (implement only, review skipped).
+	if rt.calls != 1 {
+		t.Errorf("expected 1 runtime call (implement only), got %d", rt.calls)
+	}
+	if len(s.Snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	}
+	if s.Snapshots[0].Review != "" {
+		t.Errorf("expected empty review in snapshot, got %q", s.Snapshots[0].Review)
+	}
+}
