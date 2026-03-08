@@ -8,8 +8,8 @@ import (
 
 func TestDefaults(t *testing.T) {
 	d := Defaults()
-	if d.MaxBudgetPerStep == nil || *d.MaxBudgetPerStep != "5.00" {
-		t.Errorf("expected default budget 5.00, got %v", d.MaxBudgetPerStep)
+	if d.MaxBudgetPerStep == nil || *d.MaxBudgetPerStep != "" {
+		t.Errorf("expected default budget empty (disabled), got %v", d.MaxBudgetPerStep)
 	}
 	if d.MaxIterations == nil || *d.MaxIterations != 10 {
 		t.Errorf("expected default iterations 10, got %v", d.MaxIterations)

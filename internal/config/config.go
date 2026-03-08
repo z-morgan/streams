@@ -31,7 +31,7 @@ type Config struct {
 
 // Defaults returns the built-in default configuration.
 func Defaults() Config {
-	budget := "5.00"
+	budget := ""
 	iterations := 10
 	pipeline := "coding"
 	return Config{
