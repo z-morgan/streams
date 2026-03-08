@@ -36,7 +36,8 @@ type iterationRow struct {
 	IsInProgress  bool
 	IsPaused      bool
 	HasError      bool
-	SnapshotIndex int // -1 for in-progress rows
+	Step          stream.IterStep // current step (only meaningful for in-progress rows)
+	SnapshotIndex int             // -1 for in-progress rows
 }
 
 func buildIterationList(st *stream.Stream) []iterationRow {
@@ -60,6 +61,7 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 			Phase:         currentPhase(st),
 			Iteration:     currentIter,
 			IsInProgress:  true,
+			Step:          st.GetIterStep(),
 			SnapshotIndex: -1,
 		})
 	} else if status == stream.StatusPaused {
@@ -95,6 +97,12 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 	// Header
 	header := fmt.Sprintf("%s  [%s]  %s  iter %d",
 		st.Name, st.GetStatus(), currentPhase(st), st.GetIteration())
+	if st.GetStatus() == stream.StatusRunning {
+		step := st.GetIterStep()
+		if step == stream.StepImplement || step == stream.StepReview {
+			header += " · " + step.String()
+		}
+	}
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
@@ -176,6 +184,9 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 			if row.IsPaused {
 				label += " (paused)"
 			} else {
+				if row.Step == stream.StepImplement || row.Step == stream.StepReview {
+					label += " · " + row.Step.String()
+				}
 				label = spinnerFrame + " " + label
 			}
 		}
