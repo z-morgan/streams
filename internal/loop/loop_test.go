@@ -310,6 +310,74 @@ func TestRunStoresSessionID(t *testing.T) {
 	}
 }
 
+func TestRunBreakpointPausesAutoAdvance(t *testing.T) {
+	s := newTestStream()
+	s.Pipeline = []string{"test", "coding"}
+	s.PipelineIndex = 0
+	s.Breakpoints = []int{0} // breakpoint after first phase
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "impl"}},
+			{resp: &runtime.Response{Text: "review"}},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
+
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+
+	// Should pause at breakpoint, NOT auto-advance to coding.
+	if s.PipelineIndex != 0 {
+		t.Errorf("expected PipelineIndex=0 (breakpoint should prevent advance), got %d", s.PipelineIndex)
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+}
+
+func TestRunResumeFromConvergedAdvancesPhase(t *testing.T) {
+	s := newTestStream()
+	s.Pipeline = []string{"test", "coding"}
+	s.PipelineIndex = 0
+	s.Converged = true // simulate paused at a breakpoint
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "impl"}},
+			{resp: &runtime.Response{Text: "review"}},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1"), nil, nil}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+
+	// Should have advanced to phase 1 and then converged.
+	if s.PipelineIndex != 1 {
+		t.Errorf("expected PipelineIndex=1 (advanced on resume), got %d", s.PipelineIndex)
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true after running phase 1")
+	}
+}
+
+func TestRunResumeFromConvergedLastPhasePauses(t *testing.T) {
+	s := newTestStream()
+	s.Pipeline = []string{"coding"}
+	s.PipelineIndex = 0
+	s.Converged = true // already at last phase and converged
+
+	Run(context.Background(), s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+
+	// Should immediately pause — nothing to advance to.
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+	if s.PipelineIndex != 0 {
+		t.Errorf("expected PipelineIndex=0, got %d", s.PipelineIndex)
+	}
+}
+
 func TestRunRuntimeError(t *testing.T) {
 	s := newTestStream()
 	rt := &mockRuntime{
@@ -361,5 +429,32 @@ func TestRunContinuesPastAutosquashFailure(t *testing.T) {
 	// Snapshot should record the autosquash failure.
 	if s.Snapshots[0].AutosquashErr == "" {
 		t.Error("expected AutosquashErr to be populated in snapshot")
+	}
+}
+
+func TestRunConvergesWhenAllBeadsAlreadyClosed(t *testing.T) {
+	// Simulates resuming after an autosquash failure where the implement
+	// step had already closed all beads in a prior run.
+	s := newTestStream()
+	s.Iteration = 6 // not the first iteration
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "nothing to do"}},
+			{resp: &runtime.Response{Text: "looks good"}},
+		},
+	}
+	// All beads already closed: idsBefore=[], idsAfterImpl=[], idsAfterReview=[]
+	beads := &mockBeads{openIDs: [][]string{nil, nil, nil}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if s.LastError != nil {
+		t.Errorf("expected no error, got %v", s.LastError)
 	}
 }

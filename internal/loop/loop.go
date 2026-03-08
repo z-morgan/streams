@@ -143,8 +143,10 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 		beadsClosed := setDiff(idsBefore, idsAfterImpl)
 
-		// No-progress check: if not the first iteration and no beads were closed.
-		if iteration > 0 && len(beadsClosed) == 0 {
+		// No-progress check: if not the first iteration, there were open beads
+		// to work on, but none were closed. When idsBefore is empty there's
+		// nothing to make progress on — let the review step handle convergence.
+		if iteration > 0 && len(idsBefore) > 0 && len(beadsClosed) == 0 {
 			recordError(s, phase, stream.ErrNoProgress, stream.StepImplement, "implement step closed zero beads", "")
 			return
 		}
