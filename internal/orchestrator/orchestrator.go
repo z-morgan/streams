@@ -229,6 +229,12 @@ func (o *Orchestrator) Start(id string) error {
 	st.SetLastError(nil)
 	st.SetSessionID(newUUID())
 
+	// Re-iterate: if converged with pending guidance, reset convergence
+	// so the loop re-runs the current phase with the feedback injected.
+	if st.Converged && st.GetGuidanceCount() > 0 {
+		st.SetConverged(false)
+	}
+
 	var rt runtime.Runtime = &claude.Runtime{WorkDir: st.WorkTree}
 	if o.config.MaxBudgetUSD != "" {
 		rt = &runtime.BudgetRuntime{Inner: rt, MaxBudget: o.config.MaxBudgetUSD}

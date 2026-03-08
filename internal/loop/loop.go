@@ -33,6 +33,29 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	s.SetStatus(stream.StatusRunning)
 	s.ClearOutput()
 
+	// If converged (e.g. resuming from a breakpoint) with no pending guidance,
+	// advance to the next pipeline phase before entering the iteration loop.
+	if s.Converged {
+		pipeline := s.GetPipeline()
+		nextIdx := s.GetPipelineIndex() + 1
+		if nextIdx < len(pipeline) {
+			nextPhase, err := factory(pipeline[nextIdx])
+			if err != nil {
+				recordError(s, phase, stream.ErrInfra, stream.StepCheckpoint, "failed to instantiate next phase", err.Error())
+				return
+			}
+			s.SetPipelineIndex(nextIdx)
+			s.SetConverged(false)
+			s.SetIteration(0)
+			phase = nextPhase
+			slog.Info("advancing pipeline on resume", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
+		} else {
+			// Already at last phase and converged — nothing to do.
+			s.SetStatus(stream.StatusPaused)
+			return
+		}
+	}
+
 	var pendingGuidance []stream.Guidance
 
 	for {
