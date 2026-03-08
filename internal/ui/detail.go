@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -31,18 +32,26 @@ func (d *detailView) clampCursor(count int) {
 }
 
 type iterationRow struct {
-	Phase         string
-	Iteration     int
-	IsInProgress  bool
-	IsPaused      bool
-	HasError      bool
-	Step          stream.IterStep // current step (only meaningful for in-progress rows)
-	SnapshotIndex int             // -1 for in-progress rows
+	Phase           string
+	Iteration       int
+	IsInProgress    bool
+	IsPaused        bool
+	IsBreakpoint    bool
+	HasError        bool
+	IsInitialPrompt bool
+	Step            stream.IterStep // current step (only meaningful for in-progress rows)
+	SnapshotIndex   int             // -1 for non-snapshot rows
 }
 
 func buildIterationList(st *stream.Stream) []iterationRow {
 	snaps := st.GetSnapshots()
 	var rows []iterationRow
+
+	// Initial prompt row always comes first.
+	rows = append(rows, iterationRow{
+		IsInitialPrompt: true,
+		SnapshotIndex:   -1,
+	})
 
 	for i, snap := range snaps {
 		rows = append(rows, iterationRow{
@@ -79,6 +88,7 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 				Iteration:     currentIter,
 				IsInProgress:  true,
 				IsPaused:      true,
+				IsBreakpoint:  isPausedAtBreakpoint(st),
 				SnapshotIndex: -1,
 			})
 		}
@@ -128,9 +138,13 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 		cursor := dv.iterCursor
 		if cursor >= 0 && cursor < len(rows) {
 			row := rows[cursor]
-			if row.IsInProgress {
+			if row.IsInitialPrompt {
+				right = labelStyle.Render("Initial Prompt") + "\n" + wrapText(st.Task, rightWidth)
+			} else if row.IsInProgress {
 				right = renderTailContent(st, rightWidth, paneHeight, dv.tailScroll)
-				if row.IsPaused {
+				if row.IsBreakpoint {
+					right += "\n" + helpStyle.Render("(breakpoint — press s to continue, g to add guidance)")
+				} else if row.IsPaused {
 					right += "\n" + helpStyle.Render("(paused)")
 				}
 			} else if dv.showArtifact && row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
@@ -169,12 +183,29 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 	return b.String()
 }
 
+func isPausedAtBreakpoint(st *stream.Stream) bool {
+	if st.GetStatus() != stream.StatusPaused || !st.Converged || st.GetLastError() != nil {
+		return false
+	}
+	idx := st.GetPipelineIndex()
+	for _, bp := range st.GetBreakpoints() {
+		if bp == idx {
+			return true
+		}
+	}
+	return false
+}
+
 func detailStatusMarker(st *stream.Stream) string {
 	status := st.GetStatus()
 	name := status.String()
 
 	if status == stream.StatusPaused && st.GetLastError() != nil {
-		return lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("[! Error]")
+		marker := lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("[! Error]")
+		if st.WorkTree != "" {
+			marker += "  " + helpStyle.Render(filepath.Base(st.WorkTree))
+		}
+		return marker
 	}
 
 	label := name
@@ -183,24 +214,47 @@ func detailStatusMarker(st *stream.Stream) string {
 		if step == stream.StepImplement || step == stream.StepReview {
 			label += " · " + step.String()
 		}
+	} else if isPausedAtBreakpoint(st) {
+		label += " · breakpoint"
 	}
 
 	color, ok := statusColors[name]
 	if !ok {
 		color = colorMuted
 	}
-	return lipgloss.NewStyle().Foreground(color).Render("[" + label + "]")
+	marker := lipgloss.NewStyle().Foreground(color).Render("[" + label + "]")
+
+	if st.WorkTree != "" {
+		marker += "  " + helpStyle.Render(filepath.Base(st.WorkTree))
+	}
+
+	return marker
 }
 
 func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool, spinnerFrame string) string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Iterations"))
-	b.WriteString("\n")
 
 	for i, row := range rows {
+		if row.IsInitialPrompt {
+			label := "Initial Prompt"
+			if dimmed {
+				b.WriteString(snapshotNormalStyle.Render("  " + label))
+			} else if i == cursor {
+				b.WriteString(snapshotSelectedStyle.Render("> " + label))
+			} else {
+				b.WriteString(snapshotNormalStyle.Render("  " + label))
+			}
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("Iterations"))
+			b.WriteString("\n")
+			continue
+		}
+
 		label := fmt.Sprintf("%s %d", row.Phase, row.Iteration+1)
 		if row.IsInProgress {
-			if row.IsPaused {
+			if row.IsBreakpoint {
+				label += " (breakpoint)"
+			} else if row.IsPaused {
 				label += " (paused)"
 			} else {
 				if row.Step == stream.StepImplement || row.Step == stream.StepReview {

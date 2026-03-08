@@ -15,6 +15,7 @@ type Snapshot struct {
 	CommitSHAs       []string // commits made this iteration (coding phase only)
 	BeadsClosed      []string // bead IDs closed by implement step
 	BeadsOpened      []string // bead IDs opened by review step
+	AutosquashErr    string // non-empty if autosquash failed but loop continued
 	GuidanceConsumed []Guidance
 	Error            *LoopError // non-nil if iteration ended in error (partial snapshot)
 	Timestamp        time.Time

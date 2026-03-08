@@ -129,9 +129,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// --- StepAutosquash ---
 		s.SetIterStep(stream.StepAutosquash)
 
+		var autosquashErr string
 		if err := phase.BeforeReview(pctx); err != nil {
-			recordError(s, phase, stream.ErrAutosquash, stream.StepAutosquash, "autosquash failed", err.Error())
-			return
+			// Autosquash failure is non-terminal — the code is fine, only the
+			// commit history has unsquashed fixups. Log and continue to review.
+			autosquashErr = err.Error()
+			slog.Warn("autosquash failed, continuing to review", "stream", s.ID, "err", err)
 		}
 
 		// --- StepReview ---
@@ -198,6 +201,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			CommitSHAs:       commitSHAs,
 			BeadsClosed:      beadsClosed,
 			BeadsOpened:      beadsOpened,
+			AutosquashErr:    autosquashErr,
 			GuidanceConsumed: pendingGuidance,
 			Timestamp:        time.Now(),
 		}

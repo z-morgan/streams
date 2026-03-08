@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -47,7 +48,7 @@ func (d *dashboardView) clampScroll(streamCount, visibleCols int) {
 	}
 }
 
-func renderDashboardList(streams []*stream.Stream, cursor int) string {
+func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame string) string {
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render("Streams"))
@@ -70,11 +71,23 @@ func renderDashboardList(streams []*stream.Stream, cursor int) string {
 			iter := fmt.Sprintf("iter %d", st.GetIteration())
 			guidanceCount := st.GetGuidanceCount()
 
-			row := fmt.Sprintf("%s%-20s %s  %-10s  %s",
+			spinner := "  "
+			if st.GetStatus() == stream.StatusRunning {
+				spinner = spinnerFrame + " "
+			}
+
+			worktree := ""
+			if st.WorkTree != "" {
+				worktree = helpStyle.Render(filepath.Base(st.WorkTree)) + "  "
+			}
+
+			row := fmt.Sprintf("%s%-20s %s%s  %-10s  %s%s",
 				prefix,
 				truncate(st.Name, 20),
+				worktree,
 				status,
 				phase,
+				spinner,
 				iter,
 			)
 
@@ -127,7 +140,7 @@ func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
 }
 
 // renderChannel renders a single stream as a vertical column.
-func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) string {
+func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, spinnerFrame string) string {
 	innerWidth := colWidth - 4 // border + padding takes ~4 chars
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -138,35 +151,37 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) 
 	status := statusIndicator(st)
 	phase := currentPhase(st)
 
-	header := channelHeaderStyle.Render(name) + "\n" +
-		status + "  " + channelHeaderMutedStyle.Render(phase)
+	worktree := ""
+	if st.WorkTree != "" {
+		worktree = helpStyle.Render(truncate(filepath.Base(st.WorkTree), innerWidth)) + "\n"
+	}
 
-	sep := strings.Repeat("─", innerWidth)
+	header := channelHeaderStyle.Render(name) + "\n" +
+		worktree +
+		status + "  " + channelHeaderMutedStyle.Render(phase)
 
 	// Iteration rows from snapshots
 	snapshots := st.GetSnapshots()
 	var rows []string
 	for _, snap := range snapshots {
-		label := fmt.Sprintf("%s %d", snap.Phase, snap.Iteration)
-		summary := truncate(snap.Summary, innerWidth-len(label)-2)
-		row := fmt.Sprintf("%s: %s", label, summary)
+		label := fmt.Sprintf("%s %d", snap.Phase, snap.Iteration+1)
 
 		style := iterRowStyle
 		if snap.Error != nil {
-			row = "! " + row
+			label += " !"
 			style = iterRowErrorStyle
 		}
 
-		rows = append(rows, style.Render(truncate(row, innerWidth)))
+		rows = append(rows, style.Render(truncate(label, innerWidth)))
 	}
 
 	// In-progress indicator for running streams
 	if st.GetStatus() == stream.StatusRunning {
 		step := st.GetIterStep()
 		iter := st.GetIteration()
-		indicator := fmt.Sprintf("> %s %d...", currentPhase(st), iter)
+		indicator := fmt.Sprintf("%s %s %d...", spinnerFrame, currentPhase(st), iter)
 		if step != stream.StepImplement {
-			indicator = fmt.Sprintf("> %s %d (%s)...", currentPhase(st), iter, step)
+			indicator = fmt.Sprintf("%s %s %d (%s)...", spinnerFrame, currentPhase(st), iter, step)
 		}
 		rows = append(rows, inProgressStyle.Render(truncate(indicator, innerWidth)))
 	}
@@ -177,8 +192,8 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) 
 	}
 
 	// Vertical auto-scroll: show only last N rows that fit
-	// availHeight accounts for header (2 lines) + separator (1 line)
-	maxRows := availHeight - 3
+	// availHeight accounts for header (2 lines) + separator (1 line) + gap (1 line)
+	maxRows := availHeight - 4
 	if maxRows < 1 {
 		maxRows = 1
 	}
@@ -186,6 +201,7 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) 
 		rows = rows[len(rows)-maxRows:]
 	}
 
+	sep := channelSepStyle.Render(strings.Repeat("─", innerWidth))
 	content := header + "\n" + sep + "\n" + strings.Join(rows, "\n")
 
 	borderStyle := channelBorderStyle
@@ -193,10 +209,11 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool) 
 		borderStyle = channelSelectedBorderStyle
 	}
 
-	return borderStyle.Width(innerWidth).Render(content)
+	// Width includes padding (1+1), so add 2 to keep text area = innerWidth
+	return borderStyle.Width(innerWidth + 2).Height(availHeight).Render(content)
 }
 
-func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int) string {
+func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int, spinnerFrame string) string {
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render("Streams"))
@@ -224,7 +241,7 @@ func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height 
 	}
 
 	for i := scrollLeft; i < endIdx; i++ {
-		col := renderChannel(streams[i], colWidth, availHeight, i == cursor)
+		col := renderChannel(streams[i], colWidth, availHeight, i == cursor, spinnerFrame)
 		columns = append(columns, col)
 	}
 
@@ -258,6 +275,10 @@ func statusIndicator(st *stream.Stream) string {
 
 	if status == stream.StatusPaused && st.GetLastError() != nil {
 		return lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("! Error")
+	}
+
+	if isPausedAtBreakpoint(st) {
+		return lipgloss.NewStyle().Foreground(colorWarning).Render("⏸ Breakpoint")
 	}
 
 	return style.Render(name)

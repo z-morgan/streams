@@ -88,6 +88,13 @@ type mockAutoAdvancePhase struct{ mockPhase }
 
 func (p *mockAutoAdvancePhase) TransitionMode() Transition { return TransitionAutoAdvance }
 
+// mockAutosquashFailPhase fails on BeforeReview to simulate autosquash conflict.
+type mockAutosquashFailPhase struct{ mockPhase }
+
+func (p *mockAutosquashFailPhase) BeforeReview(_ PhaseContext) error {
+	return errors.New("autosquash rebase failed: CONFLICT in file.txt")
+}
+
 func newTestStream() *stream.Stream {
 	return &stream.Stream{
 		ID:            "test-1",
@@ -322,5 +329,37 @@ func TestRunRuntimeError(t *testing.T) {
 	}
 	if s.LastError.Kind != stream.ErrRuntime {
 		t.Errorf("expected ErrRuntime, got %s", s.LastError.Kind)
+	}
+}
+
+func TestRunContinuesPastAutosquashFailure(t *testing.T) {
+	s := newTestStream()
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "implemented"}},
+			{resp: &runtime.Response{Text: "no issues"}},
+		},
+	}
+	// Per iteration: idsBefore, idsAfterImpl, idsAfterReview
+	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
+
+	Run(context.Background(), s, &mockAutosquashFailPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+
+	// Loop should converge normally despite autosquash failure.
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if s.LastError != nil {
+		t.Errorf("expected no terminal error, got %v", s.LastError)
+	}
+	if len(s.Snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	}
+	// Snapshot should record the autosquash failure.
+	if s.Snapshots[0].AutosquashErr == "" {
+		t.Error("expected AutosquashErr to be populated in snapshot")
 	}
 }
