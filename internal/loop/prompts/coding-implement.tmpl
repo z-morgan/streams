@@ -7,11 +7,16 @@ Work through these steps in order:
 {{.OrderedSteps}}
 For each step:
 1. Implement the change described in the issue.
-2. Run tests.
+2. Run relevant tests (not the full suite).
 3. Commit with a descriptive message.
 4. Close the issue: bd close {step_id}
 
 If there are also open review feedback issues (description references a commit SHA), address those with fixup commits: git commit --fixup=<sha>
+
+After creating a fixup commit, check whether your changes affect code that later commits also touch:
+1. Run git log --oneline <target-sha>..HEAD to list downstream commits.
+2. If your fixup renamed an identifier, changed a function signature, modified an interface, or altered a type that later commits reference, create additional fixup commits for each affected downstream commit.
+3. Each additional fixup must target the correct downstream SHA: git commit --fixup=<downstream-sha>
 
 Rules:
 - One commit per issue.
