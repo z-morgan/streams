@@ -55,6 +55,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			s.SetIteration(0)
 			phase = nextPhase
 			slog.Info("advancing pipeline on resume", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
+
+			// If the next phase is slotted, run its slots and return.
+			if slotted, ok := nextPhase.(SlottedPhase); ok {
+				runSlots(ctx, s, slotted, rt, git, onCheckpoint)
+				return
+			}
 		} else {
 			// Already at last phase and converged — nothing to do.
 			s.SetStatus(stream.StatusPaused)
@@ -275,6 +281,13 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				phase = nextPhase
 				pendingGuidance = nil
 				slog.Info("auto-advancing pipeline", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
+
+				// If the next phase is slotted (e.g. polish), run its slots
+				// and return instead of continuing the normal iteration loop.
+				if slotted, ok := nextPhase.(SlottedPhase); ok {
+					runSlots(ctx, s, slotted, rt, git, onCheckpoint)
+					return
+				}
 				continue
 			}
 

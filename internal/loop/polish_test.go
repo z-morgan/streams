@@ -314,6 +314,59 @@ func (r *promptCapturingRuntime) Run(ctx context.Context, req runtime.Request) (
 	return r.inner.Run(ctx, req)
 }
 
+// TestPipelineCodingToPolish verifies that a coding phase auto-advancing into
+// polish runs the slots and converges the full pipeline.
+func TestPipelineCodingToPolish(t *testing.T) {
+	s := newTestStream()
+	s.BaseSHA = "abc123"
+	s.WorkTree = "/tmp/test"
+	s.Pipeline = []string{"test", "polish"}
+	s.PipelineIndex = 0
+
+	rt := &mockRuntime{
+		results: []mockResult{
+			// Coding implement + review (auto-advance phase converges)
+			{resp: &runtime.Response{Text: "coded"}},
+			{resp: &runtime.Response{Text: "reviewed"}},
+			// Polish: one slot (commits)
+			{resp: &runtime.Response{Text: "polished commits"}},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1"), nil, nil}}
+
+	polishFactory := func(name string) (MacroPhase, error) {
+		if name == "polish" {
+			return NewPolishPhase([]string{"commits"}), nil
+		}
+		return &mockAutoAdvancePhase{}, nil
+	}
+
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, polishFactory, nil)
+
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if s.PipelineIndex != 1 {
+		t.Errorf("expected PipelineIndex=1 (polish), got %d", s.PipelineIndex)
+	}
+	// Should have 2 snapshots: 1 from coding, 1 from polish
+	if len(s.Snapshots) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", len(s.Snapshots))
+	}
+	if s.Snapshots[0].Phase != "test" {
+		t.Errorf("expected first snapshot phase=test, got %s", s.Snapshots[0].Phase)
+	}
+	if s.Snapshots[1].Phase != "polish" {
+		t.Errorf("expected second snapshot phase=polish, got %s", s.Snapshots[1].Phase)
+	}
+	if s.Snapshots[1].SlotName != "commits" {
+		t.Errorf("expected polish snapshot SlotName=commits, got %q", s.Snapshots[1].SlotName)
+	}
+}
+
 func TestNewPhaseReturnsPolish(t *testing.T) {
 	phase, err := NewPhase("polish")
 	if err != nil {
