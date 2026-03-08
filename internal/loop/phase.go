@@ -39,11 +39,11 @@ type PhaseContext struct {
 // IterationResult captures the outcome of a single iteration for convergence detection.
 // The Go loop populates this — agents don't produce it directly.
 type IterationResult struct {
-	ReviewText         string
+	ReviewText       string
 	OpenBeforeReview int
 	OpenAfterReview  int
-	BeadsClosed        []string
-	BeadsOpened        []string
+	BeadsClosed      []string
+	BeadsOpened      []string
 }
 
 // MacroPhase defines the behavior for one phase of the stream pipeline.
@@ -81,6 +81,8 @@ func NewPhase(name string) (MacroPhase, error) {
 		return &CodingPhase{}, nil
 	case "review":
 		return &ReviewPhase{}, nil
+	case "polish":
+		return NewPolishPhase(nil), nil
 	default:
 		return nil, fmt.Errorf("unknown pipeline phase: %q", name)
 	}

@@ -1,0 +1,25 @@
+You are reviewing and rewriting commit messages for a completed stream.
+
+Task: {{.Task}}
+Base SHA: {{.BaseSHA}}
+
+## Commit History
+{{.CommitLog}}
+
+## Diff Stats
+{{.DiffStat}}
+
+Instructions:
+1. Read the commit log and diff stats above.
+2. Review each commit message for clarity, accuracy, and consistency.
+3. If any commit messages are unclear, inaccurate, or inconsistent with project conventions, rewrite them using an interactive rebase:
+   - Run `git rebase -i {{.BaseSHA}}` with the appropriate editor commands to reword commits.
+   - Use `GIT_SEQUENCE_EDITOR` to automate the rebase sequence (change "pick" to "reword" for commits that need new messages).
+   - Use `GIT_EDITOR` or `EDITOR` with a script to supply the new message non-interactively.
+4. If all commit messages are already clear and consistent, do nothing.
+
+Rules:
+- Do not change any code — only commit messages.
+- Do not squash, reorder, or drop commits.
+- Keep messages concise: imperative mood, no trailing period, under 72 characters for the subject line.
+- Ensure each message accurately describes what the commit does.

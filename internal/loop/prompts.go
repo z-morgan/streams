@@ -25,6 +25,10 @@ type PromptData struct {
 	DiffStat          string
 	TotalCost         string
 	SnapshotSummaries string
+
+	// Polish phase fields.
+	BaseSHA string // stream's rebase target, used by polish templates for git commands
+	Commits string // pre-formatted per-commit sections for commit-scoped slots
 }
 
 // userPromptsDir returns the directory to check for user prompt overrides.

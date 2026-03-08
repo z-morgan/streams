@@ -33,6 +33,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	s.SetStatus(stream.StatusRunning)
 	s.ClearOutput()
 
+	// Slotted phases (e.g. polish) bypass the normal implement→review cycle.
+	if slotted, ok := phase.(SlottedPhase); ok {
+		runSlots(ctx, s, slotted, rt, git, onCheckpoint)
+		return
+	}
+
 	// If converged (e.g. resuming from a breakpoint) with no pending guidance,
 	// advance to the next pipeline phase before entering the iteration loop.
 	if s.Converged {
@@ -200,11 +206,11 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 		// --- Convergence check ---
 		result := IterationResult{
-			ReviewText:         reviewResp.Text,
+			ReviewText:       reviewResp.Text,
 			OpenBeforeReview: len(idsAfterImpl),
 			OpenAfterReview:  len(idsAfterReview),
-			BeadsClosed:        beadsClosed,
-			BeadsOpened:        beadsOpened,
+			BeadsClosed:      beadsClosed,
+			BeadsOpened:      beadsOpened,
 		}
 		converged := phase.IsConverged(result)
 
@@ -337,6 +343,119 @@ func setDiff(a, b []string) []string {
 		}
 	}
 	return diff
+}
+
+// runSlots drives a SlottedPhase by iterating over its slots serially.
+// Each slot gets its own prompt, agent invocation, and snapshot.
+func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runtime.Runtime, git GitQuerier, onCheckpoint func(*stream.Stream)) {
+	slots := phase.Slots()
+	var firstErr *stream.LoopError
+
+	for i, slot := range slots {
+		if ctx.Err() != nil {
+			s.SetStatus(stream.StatusStopped)
+			return
+		}
+
+		s.SetIteration(i)
+		s.SetIterStep(stream.StepImplement)
+
+		pctx := PhaseContext{
+			Stream:    s,
+			Runtime:   rt,
+			WorkDir:   s.WorkTree,
+			Iteration: i,
+		}
+
+		headBefore, _ := git.HeadSHA(s.WorkTree)
+
+		prompt, err := buildSlotPrompt(slot, pctx)
+		if err != nil {
+			slotErr := &stream.LoopError{
+				Kind:    stream.ErrInfra,
+				Step:    stream.StepImplement,
+				Message: fmt.Sprintf("slot %q: failed to build prompt", slot.Name),
+				Detail:  err.Error(),
+			}
+			if firstErr == nil {
+				firstErr = slotErr
+			}
+			snap := stream.Snapshot{
+				Phase:     phase.Name(),
+				Iteration: i,
+				SlotName:  slot.Name,
+				Error:     slotErr,
+				Timestamp: time.Now(),
+			}
+			s.AppendSnapshot(snap)
+			if onCheckpoint != nil {
+				onCheckpoint(s)
+			}
+			continue
+		}
+
+		req := buildRequest(prompt, slot.Tools)
+		req.OnOutput = func(line string) { s.AppendOutput(line) }
+		resp, err := rt.Run(ctx, req)
+		if err != nil {
+			if ctx.Err() != nil {
+				s.SetStatus(stream.StatusStopped)
+				return
+			}
+			kind := classifyError(err)
+			slotErr := &stream.LoopError{
+				Kind:    kind,
+				Step:    stream.StepImplement,
+				Message: fmt.Sprintf("slot %q failed", slot.Name),
+				Detail:  err.Error(),
+			}
+			if firstErr == nil {
+				firstErr = slotErr
+			}
+			snap := stream.Snapshot{
+				Phase:     phase.Name(),
+				Iteration: i,
+				SlotName:  slot.Name,
+				Error:     slotErr,
+				Timestamp: time.Now(),
+			}
+			s.AppendSnapshot(snap)
+			if onCheckpoint != nil {
+				onCheckpoint(s)
+			}
+			continue
+		}
+
+		if resp.SessionID != "" {
+			s.SetSessionID(resp.SessionID)
+		}
+
+		headAfter, _ := git.HeadSHA(s.WorkTree)
+		diffStat, _ := git.DiffStat(s.WorkTree, headBefore)
+		commitSHAs, _ := git.CommitsBetween(s.WorkTree, headBefore, headAfter)
+
+		snap := stream.Snapshot{
+			Phase:      phase.Name(),
+			Iteration:  i,
+			SlotName:   slot.Name,
+			Summary:    resp.Text,
+			CostUSD:    resp.CostUSD,
+			DiffStat:   diffStat,
+			CommitSHAs: commitSHAs,
+			Timestamp:  time.Now(),
+		}
+		s.AppendSnapshot(snap)
+		if onCheckpoint != nil {
+			onCheckpoint(s)
+		}
+	}
+
+	if firstErr != nil {
+		s.SetLastError(firstErr)
+	}
+	s.SetConverged(true)
+	s.SetStatus(stream.StatusPaused)
+	slog.Info("polish phase converged", "stream", s.ID, "slots", len(slots))
 }
 
 func appendGuidanceSection(prompt string, guidance []stream.Guidance) string {
