@@ -96,6 +96,28 @@ func TestLoadPrompt_MissingTemplate(t *testing.T) {
 	}
 }
 
+func TestLoadPrompt_RebaseTemplate(t *testing.T) {
+	original := userPromptsDir
+	userPromptsDir = func() string { return "" }
+	defer func() { userPromptsDir = original }()
+
+	data := PromptData{
+		RebaseOutput: "CONFLICT (content): Merge conflict in main.go",
+	}
+
+	prompt, err := LoadPrompt("coding", "rebase", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(prompt, "CONFLICT (content): Merge conflict in main.go") {
+		t.Error("expected prompt to contain rebase output")
+	}
+	if !strings.Contains(prompt, "rebase --continue") {
+		t.Error("expected prompt to instruct continuing the rebase")
+	}
+}
+
 func TestLoadPrompt_MalformedUserTemplate(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(

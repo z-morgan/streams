@@ -1,0 +1,18 @@
+You are resolving conflicts from a failed git rebase --autosquash. The rebase is already in progress — the worktree is in a rebasing state.
+
+Failed rebase output:
+{{.RebaseOutput}}
+
+Steps:
+1. Run git status to identify conflicted files.
+2. Read each conflicted file and resolve the conflict markers.
+   - The fixup commit message explains the intended change — favor the fixup's changes.
+   - Ensure the resolved code is consistent with both the fixup's intent and the surrounding context.
+3. Stage each resolved file with git add.
+4. Run git rebase --continue.
+5. If more conflicts appear, repeat from step 1.
+
+Rules:
+- Do NOT abort the rebase.
+- Do NOT create new commits — only resolve conflicts and continue the rebase.
+- If you cannot resolve a conflict, explain why and stop.
