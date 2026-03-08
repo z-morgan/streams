@@ -18,6 +18,7 @@ type PromptData struct {
 	ParentID     string
 	Iteration    int
 	OrderedSteps string
+	RebaseOutput string // stderr/stdout from a failed autosquash rebase; only set for the rebase prompt.
 }
 
 // userPromptsDir returns the directory to check for user prompt overrides.
