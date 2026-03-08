@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zmorgan/streams/internal/orchestrator"
@@ -91,6 +90,13 @@ func defaultPhaseChecks(pipeline []string) map[string]bool {
 
 type clearStatusMsg struct{}
 
+// spinnerTickMsg drives the animated spinner for in-progress iterations.
+type spinnerTickMsg struct{}
+
+// tailTickMsg drives periodic re-renders while the detail view is open,
+// so that streaming output appears near-live.
+type tailTickMsg struct{}
+
 // view tracks which view is active.
 type view int
 
@@ -117,7 +123,7 @@ type Model struct {
 
 	// New stream overlay state.
 	showNewStream     bool
-	newStreamInput    textinput.Model
+	newStreamInput    textarea.Model
 	newStreamStep     int             // 0 = task input, 1 = phase picker
 	newStreamPhaseCur int             // cursor into flattened phase list
 	newStreamChecked  map[string]bool // which phases are checked
@@ -136,6 +142,9 @@ type Model struct {
 	interrupting        bool // true while waiting for Interrupt to finish
 	attachedFromRunning bool // true if attach was triggered from a running stream
 	showRestartPrompt   bool // true after returning from an auto-paused attach
+
+	// Spinner animation state for in-progress iterations.
+	spinnerFrame int
 
 	// Ephemeral status message shown at bottom of dashboard.
 	statusMsg string
@@ -177,9 +186,13 @@ func New(orch *orchestrator.Orchestrator) Model {
 	ti.Placeholder = "Enter guidance for this stream..."
 	ti.CharLimit = 1000
 
-	ni := textinput.New()
+	ni := textarea.New()
 	ni.Placeholder = "Describe the task..."
-	ni.CharLimit = 200
+	ni.Prompt = ""
+	ni.CharLimit = 0
+	ni.ShowLineNumbers = false
+	ni.SetHeight(3)
+	ni.MaxHeight = 0
 
 	return Model{
 		orch:           orch,
@@ -206,7 +219,7 @@ func (m Model) Init() tea.Cmd {
 			_ = m.orch.Start(st.ID)
 		}
 	}
-	return tea.WindowSize()
+	return tea.Batch(tea.WindowSize(), spinnerTick())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -214,7 +227,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
 		m.height = msg.Height
-		m.newStreamInput.Width = m.inputWidth()
+		m.newStreamInput.SetWidth(m.inputWidth())
+		return m, nil
+	}
+
+	// Handle spinner/tail ticks globally so overlay handlers can't break the chain.
+	if _, ok := msg.(spinnerTickMsg); ok {
+		m.spinnerFrame++
+		return m, spinnerTick()
+	}
+	if _, ok := msg.(tailTickMsg); ok {
+		if m.view == viewDetail {
+			return m, tailTick()
+		}
 		return m, nil
 	}
 
@@ -360,6 +385,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.detail.iterCursor < 0 {
 				m.detail.iterCursor = 0
 			}
+			return m, tailTick()
 		} else {
 			return m.setStatus("No stream selected. Press n to create one.")
 		}
@@ -368,11 +394,11 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showNewStream = true
 		m.newStreamStep = 0
 		m.newStreamInput.Reset()
-		m.newStreamInput.Width = m.inputWidth()
+		m.newStreamInput.SetWidth(m.inputWidth())
 		m.newStreamInput.Focus()
 		m.newStreamChecked = defaultPhaseChecks(m.orch.DefaultPipeline())
 		m.newStreamPhaseCur = 0
-		return m, textinput.Blink
+		return m, textarea.Blink
 
 	case "s":
 		if st := m.selectedStream(); st != nil {
@@ -567,7 +593,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showNewStream = false
 			return m, nil
 
-		case "enter":
+		case "ctrl+n":
 			task := m.newStreamInput.Value()
 			if task == "" {
 				return m, nil
@@ -774,11 +800,12 @@ func (m Model) View() string {
 		streams := m.orch.List()
 		m.dashboard.clampCursor(len(streams))
 		var body string
+		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 		switch m.dashboard.mode {
 		case modeChannels:
-			body = renderChannels(streams, m.dashboard.cursor, m.dashboard.scrollLeft, m.width, m.height)
+			body = renderChannels(streams, m.dashboard.cursor, m.dashboard.scrollLeft, m.width, m.height, frame)
 		default:
-			body = renderDashboardList(streams, m.dashboard.cursor)
+			body = renderDashboardList(streams, m.dashboard.cursor, frame)
 		}
 		if m.creating {
 			body += "\n" + helpStyle.Render("Creating stream...")
@@ -802,7 +829,8 @@ func (m Model) View() string {
 		if layoutWidth == 0 {
 			layoutWidth = m.width
 		}
-		content := renderDetail(st, m.detail, layoutWidth, m.height)
+		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		content := renderDetail(st, m.detail, layoutWidth, m.height, frame)
 		if m.errorMsg != "" {
 			content += "\n" + errorBlockStyle.Render(m.errorMsg)
 		}
@@ -816,13 +844,13 @@ func (m Model) View() string {
 	}
 }
 
-func renderNewStreamOverlay(ti textinput.Model, step, phaseCursor int, checked map[string]bool, width, height int) string {
+func renderNewStreamOverlay(ti textarea.Model, step, phaseCursor int, checked map[string]bool, width, height int) string {
 	var overlay string
 
 	if step == 0 {
 		overlay = titleStyle.Render("New Stream") + "\n\n"
 		overlay += ti.View() + "\n\n"
-		overlay += helpStyle.Render("enter: next  esc: cancel")
+		overlay += helpStyle.Render("ctrl+n: next  esc: cancel")
 	} else {
 		overlay = titleStyle.Render("New Stream") + "\n\n"
 		overlay += helpStyle.Render("Task: "+ti.Value()) + "\n\n"
@@ -925,6 +953,18 @@ func renderDeleteConfirmOverlay(name string, width, height int) string {
 func clearStatusAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
 		return clearStatusMsg{}
+	})
+}
+
+func tailTick() tea.Cmd {
+	return tea.Tick(200*time.Millisecond, func(time.Time) tea.Msg {
+		return tailTickMsg{}
+	})
+}
+
+func spinnerTick() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg {
+		return spinnerTickMsg{}
 	})
 }
 
