@@ -213,7 +213,15 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			pipeline := s.GetPipeline()
 			nextIdx := s.GetPipelineIndex() + 1
 
-			if phase.TransitionMode() == TransitionAutoAdvance && nextIdx < len(pipeline) {
+			hasBreakpoint := false
+			for _, bp := range s.GetBreakpoints() {
+				if bp == s.GetPipelineIndex() {
+					hasBreakpoint = true
+					break
+				}
+			}
+
+			if !hasBreakpoint && phase.TransitionMode() == TransitionAutoAdvance && nextIdx < len(pipeline) {
 				nextPhase, err := factory(pipeline[nextIdx])
 				if err != nil {
 					recordError(s, phase, stream.ErrInfra, stream.StepCheckpoint, "failed to instantiate next phase", err.Error())
