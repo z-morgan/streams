@@ -85,11 +85,11 @@ func makeStream(name string, status stream.Status, pipeline []string, pipelineId
 func TestRenderChannel(t *testing.T) {
 	t.Run("basic stream with snapshots", func(t *testing.T) {
 		st := makeStream("auth-refactor", stream.StatusPaused, []string{"plan", "coding"}, 1, []stream.Snapshot{
-			{Phase: "plan", Iteration: 1, Summary: "Outlined approach"},
-			{Phase: "coding", Iteration: 1, Summary: "Added basic auth"},
+			{Phase: "plan", Iteration: 0, Summary: "Outlined approach"},
+			{Phase: "coding", Iteration: 0, Summary: "Added basic auth"},
 		})
 
-		result := renderChannel(st, 30, 20, false)
+		result := renderChannel(st, 30, 20, false, "⠋")
 
 		if !strings.Contains(result, "auth-refactor") {
 			t.Error("expected stream name in output")
@@ -104,10 +104,10 @@ func TestRenderChannel(t *testing.T) {
 
 	t.Run("error snapshot shows bang prefix", func(t *testing.T) {
 		st := makeStream("buggy", stream.StatusPaused, []string{"coding"}, 0, []stream.Snapshot{
-			{Phase: "coding", Iteration: 1, Summary: "Hit error", Error: &stream.LoopError{Message: "fail"}},
+			{Phase: "coding", Iteration: 0, Summary: "Hit error", Error: &stream.LoopError{Message: "fail"}},
 		})
 
-		result := renderChannel(st, 30, 20, false)
+		result := renderChannel(st, 30, 20, false, "⠋")
 
 		if !strings.Contains(result, "!") {
 			t.Error("expected error indicator '!' in output")
@@ -118,24 +118,45 @@ func TestRenderChannel(t *testing.T) {
 		st := makeStream("active", stream.StatusRunning, []string{"coding"}, 0, nil)
 		st.Iteration = 1
 
-		result := renderChannel(st, 30, 20, false)
+		result := renderChannel(st, 30, 20, false, "⠋")
 
-		if !strings.Contains(result, "> coding 1") {
-			t.Errorf("expected in-progress indicator, got:\n%s", result)
+		if !strings.Contains(result, "⠋ coding 1") {
+			t.Errorf("expected in-progress spinner indicator, got:\n%s", result)
+		}
+	})
+
+	t.Run("duplicate raw iterations get sequential display numbers", func(t *testing.T) {
+		// Simulates error-then-retry: two snapshots share the same raw Iteration value.
+		st := makeStream("retries", stream.StatusPaused, []string{"coding"}, 0, []stream.Snapshot{
+			{Phase: "coding", Iteration: 0, Summary: "first attempt", Error: &stream.LoopError{Message: "fail"}},
+			{Phase: "coding", Iteration: 0, Summary: "retry succeeded"},
+			{Phase: "coding", Iteration: 1, Summary: "next work"},
+		})
+
+		result := renderChannel(st, 30, 20, false, "⠋")
+
+		if !strings.Contains(result, "coding 1") {
+			t.Error("expected coding 1")
+		}
+		if !strings.Contains(result, "coding 2") {
+			t.Error("expected coding 2")
+		}
+		if !strings.Contains(result, "coding 3") {
+			t.Error("expected coding 3")
 		}
 	})
 
 	t.Run("vertical auto-scroll truncates old rows", func(t *testing.T) {
 		var snaps []stream.Snapshot
-		for i := 1; i <= 20; i++ {
+		for i := 0; i < 20; i++ {
 			snaps = append(snaps, stream.Snapshot{Phase: "coding", Iteration: i, Summary: "work"})
 		}
 		st := makeStream("long", stream.StatusPaused, []string{"coding"}, 0, snaps)
 
-		// availHeight=8 means maxRows=5, should only see last 5
-		result := renderChannel(st, 30, 8, false)
+		// availHeight=8 means maxRows=4, should only see last 4 (iterations 17-20)
+		result := renderChannel(st, 30, 8, false, "⠋")
 
-		if strings.Contains(result, "coding 1:") {
+		if strings.Contains(result, "coding 5") {
 			t.Error("expected early snapshots to be truncated")
 		}
 		if !strings.Contains(result, "coding 20") {
@@ -147,8 +168,8 @@ func TestRenderChannel(t *testing.T) {
 func TestFlattenPhaseTree(t *testing.T) {
 	flat := flattenPhaseTree(phaseTree, 0)
 
-	if len(flat) != 4 {
-		t.Fatalf("expected 4 flat phases, got %d", len(flat))
+	if len(flat) != 5 {
+		t.Fatalf("expected 5 flat phases, got %d", len(flat))
 	}
 
 	if flat[0].Name != "research" || flat[0].Depth != 0 {
@@ -162,6 +183,9 @@ func TestFlattenPhaseTree(t *testing.T) {
 	}
 	if flat[3].Name != "coding" || flat[3].Depth != 0 {
 		t.Errorf("flat[3] = %+v, want coding depth 0", flat[3])
+	}
+	if flat[4].Name != "review" || flat[4].Depth != 0 {
+		t.Errorf("flat[4] = %+v, want review depth 0", flat[4])
 	}
 }
 
@@ -223,7 +247,7 @@ func TestDefaultPhaseChecks(t *testing.T) {
 
 func TestRenderChannels(t *testing.T) {
 	t.Run("empty streams", func(t *testing.T) {
-		result := renderChannels(nil, 0, 0, 120, 40)
+		result := renderChannels(nil, 0, 0, 120, 40, "⠋")
 		if !strings.Contains(result, "No streams yet") {
 			t.Error("expected empty state message")
 		}
@@ -239,12 +263,12 @@ func TestRenderChannels(t *testing.T) {
 		}
 
 		// Width 60 fits ~2 columns at min 25 width
-		result := renderChannels(streams, 0, 0, 60, 30)
+		result := renderChannels(streams, 0, 0, 60, 30, "⠋")
 		if !strings.Contains(result, ">") {
 			t.Error("expected right scroll indicator")
 		}
 
-		result = renderChannels(streams, 3, 2, 60, 30)
+		result = renderChannels(streams, 3, 2, 60, 30, "⠋")
 		if !strings.Contains(result, "<") {
 			t.Error("expected left scroll indicator")
 		}

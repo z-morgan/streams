@@ -79,6 +79,8 @@ func NewPhase(name string) (MacroPhase, error) {
 		return &DecomposePhase{}, nil
 	case "coding":
 		return &CodingPhase{}, nil
+	case "review":
+		return &ReviewPhase{}, nil
 	default:
 		return nil, fmt.Errorf("unknown pipeline phase: %q", name)
 	}

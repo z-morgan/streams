@@ -27,6 +27,7 @@ var phaseTree = []PhaseNode{
 		{Name: "decompose"},
 	}},
 	{Name: "coding"},
+	{Name: "review"},
 }
 
 // flatPhase is a flattened view of the phase tree for cursor navigation.

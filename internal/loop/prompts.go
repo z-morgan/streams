@@ -19,6 +19,12 @@ type PromptData struct {
 	Iteration    int
 	OrderedSteps string
 	RebaseOutput string // stderr/stdout from a failed autosquash rebase; only set for the rebase prompt.
+
+	// Review phase fields (populated only by ReviewPhase.ImplementPrompt).
+	CommitLog         string
+	DiffStat          string
+	TotalCost         string
+	SnapshotSummaries string
 }
 
 // userPromptsDir returns the directory to check for user prompt overrides.
