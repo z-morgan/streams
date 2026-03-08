@@ -144,6 +144,16 @@ type Model struct {
 	pendingPipeline    []string // pipeline stashed while waiting for stealth answer
 	pendingBreakpoints []int   // breakpoints stashed while waiting for stealth answer
 
+	// Complete overlay state (review phase).
+	showComplete  bool
+	completeInput textarea.Model
+
+	// Revise overlay state (review phase).
+	showRevise        bool
+	revisePhaseCursor int
+	reviseFeedback    textarea.Model
+	reviseStep        int // 0 = phase picker, 1 = feedback input
+
 	// Attach state.
 	interrupting        bool // true while waiting for Interrupt to finish
 	attachedFromRunning bool // true if attach was triggered from a running stream
@@ -183,6 +193,16 @@ type interruptDoneMsg struct {
 
 // beadsInitDoneMsg is sent when bd init finishes.
 type beadsInitDoneMsg struct {
+	err error
+}
+
+// streamCompletedMsg is sent when orch.Complete finishes.
+type streamCompletedMsg struct {
+	err error
+}
+
+// streamRevisedMsg is sent when orch.Revise finishes.
+type streamRevisedMsg struct {
 	err error
 }
 
@@ -284,6 +304,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateNewStream(msg)
 	}
 
+	// Handle complete overlay if active.
+	if m.showComplete {
+		return m.updateComplete(msg)
+	}
+
+	// Handle revise overlay if active.
+	if m.showRevise {
+		return m.updateRevise(msg)
+	}
+
 	// Handle guidance overlay input first if active.
 	if m.showGuidance {
 		return m.updateGuidance(msg)
@@ -348,6 +378,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.attachedFromRunning {
 			m.showRestartPrompt = true
 			m.attachedFromRunning = false
+		}
+		return m, nil
+
+	case streamCompletedMsg:
+		if msg.err != nil {
+			m.errorMsg = "Error completing stream: " + msg.err.Error()
+			return m, nil
+		}
+		m.view = viewDashboard
+		return m, nil
+
+	case streamRevisedMsg:
+		if msg.err != nil {
+			m.errorMsg = "Error revising stream: " + msg.err.Error()
+			return m, nil
 		}
 		return m, nil
 
@@ -518,7 +563,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "s":
-		if st != nil {
+		if st != nil && !isPausedAtReview(st) {
 			if err := m.orch.Start(st.ID); err != nil {
 				m.statusMsg = "Start error: " + err.Error()
 			}
@@ -540,8 +585,51 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		m.detail.showArtifact = !m.detail.showArtifact
 
+	case "d":
+		if st != nil && !m.orch.IsRunning(st.ID) {
+			m.deleteTargetID = st.ID
+			m.showDeleteConfirm = true
+		}
+
+	case "c":
+		if st != nil && isPausedAtReview(st) {
+			ci := textarea.New()
+			ci.Placeholder = "feature/my-branch"
+			ci.Prompt = ""
+			ci.CharLimit = 100
+			ci.ShowLineNumbers = false
+			ci.SetHeight(1)
+			ci.MaxHeight = 0
+			ci.SetWidth(m.inputWidth())
+			ci.SetValue(slugify(st.Name))
+			ci.Focus()
+			m.completeInput = ci
+			m.showComplete = true
+			return m, textarea.Blink
+		}
+
+	case "r":
+		if st != nil && isPausedAtReview(st) {
+			fi := textarea.New()
+			fi.Placeholder = "Optional feedback for the target phase..."
+			fi.Prompt = ""
+			fi.CharLimit = 1000
+			fi.ShowLineNumbers = false
+			fi.SetHeight(3)
+			fi.MaxHeight = 0
+			fi.SetWidth(m.inputWidth())
+			m.reviseFeedback = fi
+			m.revisePhaseCursor = 0
+			m.reviseStep = 0
+			m.showRevise = true
+			return m, nil
+		}
+
 	case "a":
 		if st == nil || m.interrupting {
+			return m, nil
+		}
+		if st.GetStatus() == stream.StatusCompleted {
 			return m, nil
 		}
 		sessionID := st.GetSessionID()
@@ -870,6 +958,104 @@ func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateComplete(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.showComplete = false
+			return m, nil
+
+		case "ctrl+s":
+			branch := m.completeInput.Value()
+			if branch == "" {
+				return m, nil
+			}
+			m.showComplete = false
+			id := m.selectedID
+			orch := m.orch
+			return m, func() tea.Msg {
+				return streamCompletedMsg{err: orch.Complete(id, branch)}
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.completeInput, cmd = m.completeInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
+	st := m.orch.Get(m.selectedID)
+	if st == nil {
+		m.showRevise = false
+		return m, nil
+	}
+
+	pipeline := st.GetPipeline()
+	pipelineIdx := st.GetPipelineIndex()
+	// Phases available for revision: all before the current (review) phase.
+	phaseCount := pipelineIdx
+
+	if m.reviseStep == 1 {
+		// Feedback input step.
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				m.reviseStep = 0
+				return m, nil
+
+			case "ctrl+s":
+				m.showRevise = false
+				feedback := m.reviseFeedback.Value()
+				targetIdx := m.revisePhaseCursor
+				id := m.selectedID
+				orch := m.orch
+				return m, func() tea.Msg {
+					return streamRevisedMsg{err: orch.Revise(id, targetIdx, feedback)}
+				}
+			}
+		}
+
+		var cmd tea.Cmd
+		m.reviseFeedback, cmd = m.reviseFeedback.Update(msg)
+		return m, cmd
+	}
+
+	// Phase picker step.
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.showRevise = false
+			return m, nil
+
+		case "j", "down":
+			if m.revisePhaseCursor < phaseCount-1 {
+				m.revisePhaseCursor++
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.revisePhaseCursor > 0 {
+				m.revisePhaseCursor--
+			}
+			return m, nil
+
+		case "enter":
+			if phaseCount > 0 {
+				_ = pipeline // used above for phase count
+				m.reviseStep = 1
+				m.reviseFeedback.Focus()
+				return m, textarea.Blink
+			}
+		}
+	}
+
+	return m, nil
+}
+
 func (m Model) View() string {
 	if m.showRestartPrompt {
 		return renderRestartPromptOverlay(m.width, m.height)
@@ -890,6 +1076,23 @@ func (m Model) View() string {
 
 	if m.showNewStream {
 		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamBreakpoints, m.newStreamBPCursor, m.width, m.height)
+	}
+
+	if m.showComplete {
+		return renderCompleteOverlay(m.completeInput, m.width, m.height)
+	}
+
+	if m.showRevise {
+		st := m.orch.Get(m.selectedID)
+		var phases []string
+		if st != nil {
+			pipeline := st.GetPipeline()
+			idx := st.GetPipelineIndex()
+			if idx <= len(pipeline) {
+				phases = pipeline[:idx]
+			}
+		}
+		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, m.reviseFeedback, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -1083,6 +1286,85 @@ func renderDeleteConfirmOverlay(name string, width, height int) string {
 	box := overlayStyle.Width(maxWidth).Render(overlay)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderCompleteOverlay(ti textarea.Model, width, height int) string {
+	overlay := titleStyle.Render("Complete Stream") + "\n\n"
+	overlay += "Branch name:\n"
+	overlay += ti.View() + "\n\n"
+	overlay += helpStyle.Render("ctrl+s: complete  esc: cancel")
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderReviseOverlay(phases []string, cursor, step int, feedback textarea.Model, width, height int) string {
+	overlay := titleStyle.Render("Revise Stream") + "\n\n"
+
+	if step == 1 {
+		if cursor >= 0 && cursor < len(phases) {
+			overlay += helpStyle.Render("Target phase: "+phases[cursor]) + "\n\n"
+		}
+		overlay += "Feedback (optional):\n"
+		overlay += feedback.View() + "\n\n"
+		overlay += helpStyle.Render("ctrl+s: revise  esc: back")
+	} else {
+		overlay += "Select a phase to continue from:\n\n"
+		for i, name := range phases {
+			prefix := "  "
+			if i == cursor {
+				prefix = cursorStyle.Render("> ")
+			}
+			label := name
+			if i == cursor {
+				label = selectedRowStyle.Render(label)
+			}
+			overlay += prefix + label + "\n"
+		}
+		overlay += "\n" + helpStyle.Render("j/k: navigate  enter: select  esc: cancel")
+	}
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	box := overlayStyle.Width(maxWidth).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// isPausedAtReview returns true when the stream is paused and converged at
+// the review phase with no error — the state where c/r actions are available.
+func isPausedAtReview(st *stream.Stream) bool {
+	if st.GetStatus() != stream.StatusPaused || !st.Converged || st.GetLastError() != nil {
+		return false
+	}
+	return currentPhase(st) == "review"
+}
+
+// slugify converts a title into a branch-name-friendly slug.
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	s = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' {
+			return r
+		}
+		if r == ' ' || r == '_' {
+			return '-'
+		}
+		return -1
+	}, s)
+	// Collapse multiple dashes.
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	return s
 }
 
 func clearStatusAfter(d time.Duration) tea.Cmd {

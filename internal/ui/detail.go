@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -53,39 +52,44 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 		SnapshotIndex:   -1,
 	})
 
+	// Number snapshots sequentially per phase for display purposes.
+	phaseCount := make(map[string]int)
 	for i, snap := range snaps {
+		phaseCount[snap.Phase]++
 		rows = append(rows, iterationRow{
 			Phase:         snap.Phase,
-			Iteration:     snap.Iteration,
+			Iteration:     phaseCount[snap.Phase] - 1, // 0-based; rendered as +1
 			HasError:      snap.Error != nil,
 			SnapshotIndex: i,
 		})
 	}
 
 	status := st.GetStatus()
-	currentIter := st.GetIteration()
+	phase := currentPhase(st)
 
 	if status == stream.StatusRunning {
 		rows = append(rows, iterationRow{
-			Phase:         currentPhase(st),
-			Iteration:     currentIter,
+			Phase:         phase,
+			Iteration:     phaseCount[phase], // next sequential number (0-based)
 			IsInProgress:  true,
 			Step:          st.GetIterStep(),
 			SnapshotIndex: -1,
 		})
 	} else if status == stream.StatusPaused {
-		// Append a paused row if no snapshot matches the current iteration
-		hasSnapshot := false
-		for _, snap := range snaps {
-			if snap.Iteration == currentIter && snap.Phase == currentPhase(st) {
-				hasSnapshot = true
+		// Append a paused row if the last snapshot for this phase already
+		// covers the current state (e.g. an error snapshot).
+		lastPhaseSnap := -1
+		for i := len(snaps) - 1; i >= 0; i-- {
+			if snaps[i].Phase == phase {
+				lastPhaseSnap = i
 				break
 			}
 		}
+		hasSnapshot := lastPhaseSnap >= 0 && snaps[lastPhaseSnap].Iteration == st.GetIteration()
 		if !hasSnapshot {
 			rows = append(rows, iterationRow{
-				Phase:         currentPhase(st),
-				Iteration:     currentIter,
+				Phase:         phase,
+				Iteration:     phaseCount[phase],
 				IsInProgress:  true,
 				IsPaused:      true,
 				IsBreakpoint:  isPausedAtBreakpoint(st),
@@ -160,24 +164,7 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 	}
 
 	b.WriteString("\n")
-	help := "j/k: iterations  enter: focus output  a: attach  s: start  x: stop  g: guidance  q/esc: back"
-	if dv.focusRight {
-		help = "j/k: scroll  G: bottom  esc: back to list"
-	}
-	// Show artifact toggle hint when the selected snapshot has an artifact
-	if !dv.focusRight {
-		cursor := dv.iterCursor
-		if cursor >= 0 && cursor < len(rows) {
-			row := rows[cursor]
-			if row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
-				if dv.showArtifact {
-					help += "  f: show summary"
-				} else {
-					help += "  f: show " + snaps[row.SnapshotIndex].Phase + ".md"
-				}
-			}
-		}
-	}
+	help := detailHelpText(st, dv, rows, snaps)
 	b.WriteString(helpStyle.Render(help))
 
 	return b.String()
@@ -196,14 +183,53 @@ func isPausedAtBreakpoint(st *stream.Stream) bool {
 	return false
 }
 
+func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps []stream.Snapshot) string {
+	if dv.focusRight {
+		return "j/k: scroll  G: bottom  esc: back to list"
+	}
+
+	status := st.GetStatus()
+
+	if status == stream.StatusCompleted {
+		return "d: delete  q/esc: back"
+	}
+
+	if isPausedAtReview(st) {
+		return "j/k: iterations  c: complete  r: revise  g: guidance  d: delete  q/esc: back"
+	}
+
+	help := "j/k: iterations  enter: focus output  a: attach  s: start  x: stop  g: guidance  q/esc: back"
+
+	// Show artifact toggle hint when the selected snapshot has an artifact.
+	cursor := dv.iterCursor
+	if cursor >= 0 && cursor < len(rows) {
+		row := rows[cursor]
+		if row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
+			if dv.showArtifact {
+				help += "  f: show summary"
+			} else {
+				help += "  f: show " + snaps[row.SnapshotIndex].Phase + ".md"
+			}
+		}
+	}
+
+	return help
+}
+
 func detailStatusMarker(st *stream.Stream) string {
 	status := st.GetStatus()
 	name := status.String()
 
+	if status == stream.StatusCompleted {
+		marker := lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("[Completed]")
+		marker += "  " + helpStyle.Render("branch: "+st.Branch)
+		return marker
+	}
+
 	if status == stream.StatusPaused && st.GetLastError() != nil {
 		marker := lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("[! Error]")
 		if st.WorkTree != "" {
-			marker += "  " + helpStyle.Render(filepath.Base(st.WorkTree))
+			marker += "  " + helpStyle.Render("worktree: "+st.Branch)
 		}
 		return marker
 	}
@@ -225,7 +251,7 @@ func detailStatusMarker(st *stream.Stream) string {
 	marker := lipgloss.NewStyle().Foreground(color).Render("[" + label + "]")
 
 	if st.WorkTree != "" {
-		marker += "  " + helpStyle.Render(filepath.Base(st.WorkTree))
+		marker += "  " + helpStyle.Render("worktree: "+st.Branch)
 	}
 
 	return marker
@@ -287,15 +313,22 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 
 	var b strings.Builder
 
-	b.WriteString(labelStyle.Render("Summary"))
+	b.WriteString(labelStyle.Render("Iteration Snapshot"))
+	b.WriteString("\n\n")
+
+	b.WriteString(labelStyle.Render("Implementation Agent's Report"))
 	b.WriteString("\n")
 	b.WriteString(wrapText(snap.Summary, width))
 	b.WriteString("\n\n")
 
-	if snap.Review != "" {
-		b.WriteString(labelStyle.Render("Review"))
+	reviewText := snap.Review
+	if reviewText == "" {
+		reviewText = reviewFallback(snap)
+	}
+	if reviewText != "" {
+		b.WriteString(labelStyle.Render("Review Agent's Report"))
 		b.WriteString("\n")
-		b.WriteString(wrapText(snap.Review, width))
+		b.WriteString(wrapText(reviewText, width))
 		b.WriteString("\n\n")
 	}
 
@@ -413,6 +446,19 @@ func clipLines(s string, maxWidth int) string {
 // to the given visible width.
 func truncateAnsi(s string, maxWidth int) string {
 	return ansi.Truncate(s, maxWidth, "")
+}
+
+// reviewFallback generates a summary line when the review agent's text output
+// was empty but it did produce observable side effects (filed issues).
+func reviewFallback(snap stream.Snapshot) string {
+	n := len(snap.BeadsOpened)
+	if n == 0 {
+		return ""
+	}
+	if n == 1 {
+		return fmt.Sprintf("Filed 1 issue: %s", snap.BeadsOpened[0])
+	}
+	return fmt.Sprintf("Filed %d issues: %s", n, strings.Join(snap.BeadsOpened, ", "))
 }
 
 func wrapText(s string, width int) string {

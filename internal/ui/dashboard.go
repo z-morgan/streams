@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -78,7 +77,7 @@ func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame stri
 
 			worktree := ""
 			if st.WorkTree != "" {
-				worktree = helpStyle.Render(filepath.Base(st.WorkTree)) + "  "
+				worktree = helpStyle.Render("worktree: "+st.Branch) + "  "
 			}
 
 			row := fmt.Sprintf("%s%-20s %s%s  %-10s  %s%s",
@@ -153,18 +152,20 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 
 	worktree := ""
 	if st.WorkTree != "" {
-		worktree = helpStyle.Render(truncate(filepath.Base(st.WorkTree), innerWidth)) + "\n"
+		worktree = helpStyle.Render(truncate("worktree: "+st.Branch, innerWidth)) + "\n"
 	}
 
 	header := channelHeaderStyle.Render(name) + "\n" +
 		worktree +
 		status + "  " + channelHeaderMutedStyle.Render(phase)
 
-	// Iteration rows from snapshots
+	// Iteration rows from snapshots — number sequentially per phase
 	snapshots := st.GetSnapshots()
 	var rows []string
+	phaseCount := make(map[string]int)
 	for _, snap := range snapshots {
-		label := fmt.Sprintf("%s %d", snap.Phase, snap.Iteration+1)
+		phaseCount[snap.Phase]++
+		label := fmt.Sprintf("%s %d", snap.Phase, phaseCount[snap.Phase])
 
 		style := iterRowStyle
 		if snap.Error != nil {
@@ -178,10 +179,11 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 	// In-progress indicator for running streams
 	if st.GetStatus() == stream.StatusRunning {
 		step := st.GetIterStep()
-		iter := st.GetIteration()
-		indicator := fmt.Sprintf("%s %s %d...", spinnerFrame, currentPhase(st), iter)
+		phase := currentPhase(st)
+		displayNum := phaseCount[phase] + 1
+		indicator := fmt.Sprintf("%s %s %d...", spinnerFrame, phase, displayNum)
 		if step != stream.StepImplement {
-			indicator = fmt.Sprintf("%s %s %d (%s)...", spinnerFrame, currentPhase(st), iter, step)
+			indicator = fmt.Sprintf("%s %s %d (%s)...", spinnerFrame, phase, displayNum, step)
 		}
 		rows = append(rows, inProgressStyle.Render(truncate(indicator, innerWidth)))
 	}
@@ -273,12 +275,20 @@ func statusIndicator(st *stream.Stream) string {
 	}
 	style := lipgloss.NewStyle().Foreground(color)
 
+	if status == stream.StatusCompleted {
+		return lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("✓ Completed")
+	}
+
 	if status == stream.StatusPaused && st.GetLastError() != nil {
 		return lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("! Error")
 	}
 
 	if isPausedAtBreakpoint(st) {
 		return lipgloss.NewStyle().Foreground(colorWarning).Render("⏸ Breakpoint")
+	}
+
+	if isPausedAtReview(st) {
+		return lipgloss.NewStyle().Foreground(colorWarning).Render("⏸ Review")
 	}
 
 	return style.Render(name)
