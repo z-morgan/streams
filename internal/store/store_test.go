@@ -246,6 +246,66 @@ func TestSaveAndLoadWithGuidance(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadWithBreakpoints(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	st := &stream.Stream{
+		ID:          "test-bp",
+		Name:        "Breakpoint test",
+		Task:        "test",
+		Pipeline:    []string{"research", "plan", "coding"},
+		Breakpoints: []int{0, 1},
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	_, err := s.Save(st, 0)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := s.Load("test-bp")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(loaded.Breakpoints) != 2 {
+		t.Fatalf("Breakpoints: got %d, want 2", len(loaded.Breakpoints))
+	}
+	if loaded.Breakpoints[0] != 0 || loaded.Breakpoints[1] != 1 {
+		t.Errorf("Breakpoints: got %v, want [0 1]", loaded.Breakpoints)
+	}
+}
+
+func TestSaveAndLoadWithoutBreakpoints(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	st := &stream.Stream{
+		ID:        "test-no-bp",
+		Name:      "No breakpoints",
+		Task:      "test",
+		Pipeline:  []string{"coding"},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	_, err := s.Save(st, 0)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := s.Load("test-no-bp")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(loaded.Breakpoints) != 0 {
+		t.Errorf("Breakpoints: got %v, want empty", loaded.Breakpoints)
+	}
+}
+
 func TestLoadAllIgnoresFiles(t *testing.T) {
 	root := t.TempDir()
 	s := &Store{Root: root}
