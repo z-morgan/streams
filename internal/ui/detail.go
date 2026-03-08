@@ -226,6 +226,20 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 		b.WriteString("\n\n")
 	}
 
+	if len(snap.BeadsClosed) > 0 {
+		b.WriteString(labelStyle.Render(fmt.Sprintf("Closed (%d)", len(snap.BeadsClosed))))
+		b.WriteString("\n")
+		b.WriteString("  " + strings.Join(snap.BeadsClosed, "  "))
+		b.WriteString("\n\n")
+	}
+
+	if len(snap.BeadsOpened) > 0 {
+		b.WriteString(labelStyle.Render(fmt.Sprintf("Opened (%d)", len(snap.BeadsOpened))))
+		b.WriteString("\n")
+		b.WriteString("  " + strings.Join(snap.BeadsOpened, "  "))
+		b.WriteString("\n\n")
+	}
+
 	if snap.DiffStat != "" {
 		b.WriteString(labelStyle.Render("Diff"))
 		b.WriteString("\n")
