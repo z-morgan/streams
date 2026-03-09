@@ -270,43 +270,87 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 	var b strings.Builder
 
 	for i, row := range rows {
+		label := ""
+		icon := ""
+		var iconColor lipgloss.Color
+
 		if row.IsInitialPrompt {
-			label := "Initial Prompt"
-			if dimmed {
-				b.WriteString(snapshotNormalStyle.Render("  " + label))
-			} else if i == cursor {
-				b.WriteString(snapshotSelectedStyle.Render("> " + label))
-			} else {
-				b.WriteString(snapshotNormalStyle.Render("  " + label))
-			}
-			b.WriteString("\n")
-			continue
-		}
-
-		label := fmt.Sprintf("%s %d", row.Phase, row.Iteration+1)
-		if row.IsInProgress {
-			if row.IsBreakpoint {
-				label += " (breakpoint)"
-			} else if row.IsPaused {
-				label += " (paused)"
-			} else {
-				if row.Step == stream.StepImplement || row.Step == stream.StepReview {
-					label += " · " + row.Step.String()
-				}
-				label = spinnerFrame + " " + label
-			}
-		}
-		if row.HasError {
-			label += " !"
-		}
-
-		if dimmed {
-			b.WriteString(snapshotNormalStyle.Render("  " + label))
-		} else if i == cursor {
-			b.WriteString(snapshotSelectedStyle.Render("> " + label))
+			label = "Initial Prompt"
 		} else {
-			b.WriteString(snapshotNormalStyle.Render("  " + label))
+			label = fmt.Sprintf("%s %d", row.Phase, row.Iteration+1)
+			if row.IsInProgress {
+				if row.IsBreakpoint || row.IsPaused {
+					icon = "⏸"
+					iconColor = colorWarning
+				} else {
+					if row.Step == stream.StepImplement || row.Step == stream.StepReview {
+						label += " · " + row.Step.String()
+					}
+					icon = spinnerFrame
+					iconColor = colorPrimary
+				}
+			} else if row.HasError {
+				icon = "✗"
+				iconColor = colorError
+			} else {
+				icon = "✓"
+				iconColor = colorSuccess
+			}
 		}
+
+		isSelected := !dimmed && i == cursor
+
+		// Layout: [▌/ ][space][label...][padding][space+icon]
+		prefixWidth := 2
+		iconSpace := 0
+		if icon != "" {
+			iconSpace = 2 // space + icon char
+		}
+		maxLabel := width - prefixWidth - iconSpace
+		if maxLabel < 0 {
+			maxLabel = 0
+		}
+
+		if lipgloss.Width(label) > maxLabel {
+			label = ansi.Truncate(label, maxLabel, "…")
+		}
+		pad := maxLabel - lipgloss.Width(label)
+		if pad < 0 {
+			pad = 0
+		}
+
+		if isSelected {
+			bg := colorSubtle
+			accent := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render("▌")
+			labelColor := colorPrimary
+			if row.IsInitialPrompt {
+				labelColor = colorMuted
+			}
+			labelStr := lipgloss.NewStyle().Foreground(labelColor).Background(bg).Bold(true).Render(" " + label)
+			padStr := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
+			iconStr := ""
+			if icon != "" {
+				iconStr = lipgloss.NewStyle().Foreground(iconColor).Background(bg).Render(" " + icon)
+			}
+			b.WriteString(accent + labelStr + padStr + iconStr)
+		} else {
+			labelColor := colorSecondary
+			if dimmed || row.IsInitialPrompt {
+				labelColor = colorMuted
+			}
+			labelStr := lipgloss.NewStyle().Foreground(labelColor).Render("  " + label)
+			padStr := strings.Repeat(" ", pad)
+			iconStr := ""
+			if icon != "" {
+				ic := iconColor
+				if dimmed {
+					ic = colorMuted
+				}
+				iconStr = lipgloss.NewStyle().Foreground(ic).Render(" " + icon)
+			}
+			b.WriteString(labelStr + padStr + iconStr)
+		}
+
 		b.WriteString("\n")
 	}
 	return b.String()
