@@ -196,14 +196,14 @@ func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
 
 // renderChannel renders a single stream as a vertical column.
 func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, spinnerFrame string) string {
-	innerWidth := colWidth - 4 // border + padding takes ~4 chars
+	innerWidth := colWidth - 6 // border (2) + padding (2) + margin (2)
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
 
-	// Header: name + status/phase
-	name := truncate(st.Name, innerWidth)
-	status := statusIndicator(st)
+	// Header: status dot + name + phase
+	name := truncate(st.Name, innerWidth-2) // leave room for dot prefix
+	dot := statusDot(st)
 	phase := currentPhase(st)
 
 	worktree := ""
@@ -211,9 +211,9 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 		worktree = helpStyle.Render(truncate("worktree: "+st.Branch, innerWidth)) + "\n"
 	}
 
-	header := channelHeaderStyle.Render(name) + "\n" +
+	header := dot + " " + channelHeaderStyle.Render(name) + "\n" +
 		worktree +
-		status + "  " + channelHeaderMutedStyle.Render(phase)
+		channelHeaderMutedStyle.Render(phase)
 
 	// Iteration rows from snapshots — number sequentially per phase
 	snapshots := st.GetSnapshots()
@@ -298,23 +298,50 @@ func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height 
 		columns = append(columns, col)
 	}
 
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, columns...))
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 
-	// Scroll indicators
-	var indicators []string
+	// Edge-mounted scroll arrows
+	leftArrow := " "
+	rightArrow := " "
 	if scrollLeft > 0 {
-		indicators = append(indicators, "<")
+		leftArrow = helpStyle.Render("◀")
 	}
 	if endIdx < len(streams) {
-		indicators = append(indicators, ">")
+		rightArrow = helpStyle.Render("▶")
 	}
-	if len(indicators) > 0 {
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render(strings.Join(indicators, "  ")))
+	if scrollLeft > 0 || endIdx < len(streams) {
+		// Mount arrows vertically centered on the channel area
+		joinedLines := strings.Split(joined, "\n")
+		midLine := len(joinedLines) / 2
+		var result strings.Builder
+		for i, line := range joinedLines {
+			if i == midLine {
+				result.WriteString(leftArrow + line + rightArrow)
+			} else {
+				result.WriteString(" " + line + " ")
+			}
+			if i < len(joinedLines)-1 {
+				result.WriteString("\n")
+			}
+		}
+		joined = result.String()
 	}
 
+	b.WriteString(joined)
 	b.WriteString("\n")
 	return b.String()
+}
+
+func statusDot(st *stream.Stream) string {
+	status := st.GetStatus()
+	color, ok := statusColors[status.String()]
+	if !ok {
+		color = colorMuted
+	}
+	if status == stream.StatusPaused && st.GetLastError() != nil {
+		color = colorError
+	}
+	return lipgloss.NewStyle().Foreground(color).Render("●")
 }
 
 func statusIndicator(st *stream.Stream) string {

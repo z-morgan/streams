@@ -267,12 +267,12 @@ func TestRenderChannels(t *testing.T) {
 
 		// Width 60 fits ~2 columns at min 25 width
 		result := renderChannels(streams, 0, 0, 60, 30, "⠋")
-		if !strings.Contains(result, ">") {
+		if !strings.Contains(result, "▶") {
 			t.Error("expected right scroll indicator")
 		}
 
 		result = renderChannels(streams, 3, 2, 60, 30, "⠋")
-		if !strings.Contains(result, "<") {
+		if !strings.Contains(result, "◀") {
 			t.Error("expected left scroll indicator")
 		}
 	})

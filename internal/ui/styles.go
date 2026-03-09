@@ -123,27 +123,14 @@ var (
 			Bold(true)
 
 	// Channel view styles
-	dashedVerticalBorder = lipgloss.Border{
-		Left:  "┊",
-		Right: "┊",
-	}
-
 	channelBorderStyle = lipgloss.NewStyle().
-				BorderStyle(dashedVerticalBorder).
-				BorderLeft(true).
-				BorderRight(true).
-				BorderTop(false).
-				BorderBottom(false).
+				BorderStyle(lipgloss.RoundedBorder()).
 				BorderForeground(colorMuted).
 				PaddingLeft(1).
 				PaddingRight(1)
 
 	channelSelectedBorderStyle = lipgloss.NewStyle().
-					BorderStyle(dashedVerticalBorder).
-					BorderLeft(true).
-					BorderRight(true).
-					BorderTop(false).
-					BorderBottom(false).
+					BorderStyle(lipgloss.RoundedBorder()).
 					BorderForeground(colorPrimary).
 					PaddingLeft(1).
 					PaddingRight(1)
