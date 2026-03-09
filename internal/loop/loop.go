@@ -188,38 +188,49 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// --- StepReview ---
 		s.SetIterStep(stream.StepReview)
 
-		reviewPrompt, err := phase.ReviewPrompt(pctx)
-		if err != nil {
-			recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to load review prompt", err.Error())
-			return
-		}
-
 		var reviewResp *runtime.Response
-		if reviewPrompt == "" {
-			// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
+		var idsAfterReview []string
+		var beadsOpened []string
+
+		if s.DrainConvergeASAP() {
+			// ConvergeASAP: skip review so open count stays the same → IsConverged() returns true.
+			slog.Info("converge ASAP: skipping review", "stream", s.ID, "phase", phase.Name(), "iteration", iteration)
+			s.AppendOutput("[streams] Wrapping up — skipping review to converge phase")
 			reviewResp = &runtime.Response{}
+			idsAfterReview = idsAfterImpl
 		} else {
-			reviewReq := buildRequest(reviewPrompt, phase.ReviewTools())
-			reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
-			reviewResp, err = rt.Run(ctx, reviewReq)
+			reviewPrompt, err := phase.ReviewPrompt(pctx)
 			if err != nil {
-				if ctx.Err() != nil {
-					s.SetStatus(stream.StatusStopped)
-					return
-				}
-				kind := classifyError(err)
-				recordError(s, phase, kind, stream.StepReview, "review step failed", err.Error())
+				recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to load review prompt", err.Error())
 				return
 			}
-		}
 
-		idsAfterReview, err := beads.ListOpenChildren(s.BeadsParentID)
-		if err != nil {
-			recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to list open children after review", err.Error())
-			return
-		}
+			if reviewPrompt == "" {
+				// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
+				reviewResp = &runtime.Response{}
+			} else {
+				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools())
+				reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
+				reviewResp, err = rt.Run(ctx, reviewReq)
+				if err != nil {
+					if ctx.Err() != nil {
+						s.SetStatus(stream.StatusStopped)
+						return
+					}
+					kind := classifyError(err)
+					recordError(s, phase, kind, stream.StepReview, "review step failed", err.Error())
+					return
+				}
+			}
 
-		beadsOpened := setDiff(idsAfterReview, idsAfterImpl)
+			idsAfterReview, err = beads.ListOpenChildren(s.BeadsParentID)
+			if err != nil {
+				recordError(s, phase, stream.ErrInfra, stream.StepReview, "failed to list open children after review", err.Error())
+				return
+			}
+
+			beadsOpened = setDiff(idsAfterReview, idsAfterImpl)
+		}
 
 		// --- Convergence check ---
 		result := IterationResult{
