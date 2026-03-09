@@ -219,6 +219,8 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 	var help string
 	if status == stream.StatusRunning {
 		help = "j/k: iterations  enter: focus output  a: attach  w: wrap up  x: stop  g: guidance  q/esc: back"
+	} else if canForceAdvance(st) {
+		help = "j/k: iterations  enter: focus output  a: attach  s: start  >: skip phase  D: diagnose  g: guidance  q/esc: back"
 	} else {
 		help = "j/k: iterations  enter: focus output  a: attach  s: start  D: diagnose  x: stop  g: guidance  q/esc: back"
 	}

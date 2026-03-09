@@ -447,6 +447,35 @@ func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) 
 	return o.Start(id)
 }
 
+// ForceAdvance skips the current pipeline phase and starts the next one.
+// The stream must be paused or stopped and not at the last phase.
+func (o *Orchestrator) ForceAdvance(id string) error {
+	o.mu.Lock()
+	st := o.streams[id]
+	if st == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q not found", id)
+	}
+	if _, running := o.cancels[id]; running {
+		o.mu.Unlock()
+		return fmt.Errorf("stream %q is still running — stop it first", id)
+	}
+	o.mu.Unlock()
+
+	pipeline := st.GetPipeline()
+	nextIdx := st.GetPipelineIndex() + 1
+	if nextIdx >= len(pipeline) {
+		return fmt.Errorf("stream %q is already at the last pipeline phase", id)
+	}
+
+	st.SetPipelineIndex(nextIdx)
+	st.SetConverged(false)
+	st.SetIteration(0)
+	st.SetLastError(nil)
+
+	return o.Start(id)
+}
+
 // Converge sets the ConvergeASAP flag on a running stream, causing the loop
 // to skip the next review step and converge the current phase.
 func (o *Orchestrator) Converge(id string) error {

@@ -148,6 +148,9 @@ type Model struct {
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
 
+	// Force-advance confirmation overlay state.
+	showForceAdvance bool
+
 	// Complete overlay state (review phase).
 	showComplete  bool
 	completeInput textarea.Model
@@ -208,6 +211,11 @@ type streamCompletedMsg struct {
 
 // streamRevisedMsg is sent when orch.Revise finishes.
 type streamRevisedMsg struct {
+	err error
+}
+
+// forceAdvancedMsg is sent when orch.ForceAdvance finishes.
+type forceAdvancedMsg struct {
 	err error
 }
 
@@ -325,6 +333,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConvergeConfirm(msg)
 	}
 
+	// Handle force-advance confirmation overlay if active.
+	if m.showForceAdvance {
+		return m.updateForceAdvance(msg)
+	}
+
 	// Handle complete overlay if active.
 	if m.showComplete {
 		return m.updateComplete(msg)
@@ -413,6 +426,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamRevisedMsg:
 		if msg.err != nil {
 			m = m.withError("Error revising stream: " + msg.err.Error())
+			return m, nil
+		}
+		return m, nil
+
+	case forceAdvancedMsg:
+		if msg.err != nil {
+			m = m.withError("Error advancing phase: " + msg.err.Error())
 			return m, nil
 		}
 		return m, nil
@@ -662,6 +682,12 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "w":
 		if st != nil && st.GetStatus() == stream.StatusRunning {
 			m.showConvergeConfirm = true
+			return m, nil
+		}
+
+	case ">":
+		if st != nil && canForceAdvance(st) {
+			m.showForceAdvance = true
 			return m, nil
 		}
 
@@ -1000,6 +1026,25 @@ func (m Model) updateConvergeConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateForceAdvance(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case ">":
+			m.showForceAdvance = false
+			id := m.selectedID
+			orch := m.orch
+			return m, func() tea.Msg {
+				return forceAdvancedMsg{err: orch.ForceAdvance(id)}
+			}
+		case "esc":
+			m.showForceAdvance = false
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1148,6 +1193,19 @@ func (m Model) View() string {
 
 	if m.showConvergeConfirm {
 		return renderConvergeConfirmOverlay(m.width, m.height)
+	}
+
+	if m.showForceAdvance {
+		st := m.orch.Get(m.selectedID)
+		nextPhase := ""
+		if st != nil {
+			pipeline := st.GetPipeline()
+			nextIdx := st.GetPipelineIndex() + 1
+			if nextIdx < len(pipeline) {
+				nextPhase = pipeline[nextIdx]
+			}
+		}
+		return renderForceAdvanceOverlay(nextPhase, m.width, m.height)
 	}
 
 	if m.showComplete {
@@ -1346,6 +1404,19 @@ func renderConvergeConfirmOverlay(width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
+func renderForceAdvanceOverlay(nextPhase string, width, height int) string {
+	overlay := overlayTitleStyle.Render("Skip to Next Phase") + "\n\n"
+	overlay += "Force-advance the pipeline, skipping the\n"
+	overlay += "current phase without waiting for convergence.\n\n"
+	if nextPhase != "" {
+		overlay += "Next phase: " + lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(nextPhase) + "\n\n"
+	}
+	overlay += helpStyle.Render(">: confirm  esc: cancel")
+
+	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
 func renderDeleteConfirmOverlay(name string, width, height int) string {
 	overlay := overlayTitleStyle.Render("Delete Stream") + "\n\n"
 	overlay += fmt.Sprintf("Delete %q?\n\n", name)
@@ -1499,6 +1570,17 @@ func (m Model) selectedStream() *stream.Stream {
 		return streams[m.dashboard.cursor]
 	}
 	return nil
+}
+
+// canForceAdvance returns true when the stream can be force-advanced to the
+// next pipeline phase (paused/stopped, not at the last phase).
+func canForceAdvance(st *stream.Stream) bool {
+	status := st.GetStatus()
+	if status != stream.StatusPaused && status != stream.StatusStopped {
+		return false
+	}
+	pipeline := st.GetPipeline()
+	return st.GetPipelineIndex() < len(pipeline)-1
 }
 
 // canDiagnose returns true when the stream is in a state suitable for diagnosis
