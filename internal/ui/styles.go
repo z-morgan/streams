@@ -91,6 +91,16 @@ var (
 	helpStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(colorHighlight).
+			Bold(true)
+
+	helpActionStyle = lipgloss.NewStyle().
+			Foreground(colorMuted)
+
+	helpSepStyle = lipgloss.NewStyle().
+			Foreground(colorSubtle)
+
 	// Tail view styles
 	toolLineStyle = lipgloss.NewStyle().
 			Foreground(colorSecondary).

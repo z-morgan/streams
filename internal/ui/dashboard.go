@@ -102,6 +102,29 @@ func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame stri
 const dashboardListHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  D: diagnose  g: guidance  v: channels  q: quit"
 const dashboardChannelHelp = "h/l: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  D: diagnose  g: guidance  v: list  q: quit"
 
+// renderHelp formats a help string with styled keys and actions.
+// Input format: "key: action  key: action  key: action"
+// Groups are separated by double spaces; key/action split on first ":".
+func renderHelp(help string) string {
+	groups := strings.Split(help, "  ")
+	var parts []string
+	sep := helpSepStyle.Render(" │ ")
+	for _, g := range groups {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		if idx := strings.Index(g, ": "); idx >= 0 {
+			key := g[:idx]
+			action := g[idx+2:]
+			parts = append(parts, helpKeyStyle.Render(key)+helpActionStyle.Render(" "+action))
+		} else {
+			parts = append(parts, helpActionStyle.Render(g))
+		}
+	}
+	return strings.Join(parts, sep)
+}
+
 // channelLayout computes column width and visible column count for the
 // terminal width. Columns are between 25 and 40 characters wide.
 func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {

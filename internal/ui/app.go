@@ -1188,12 +1188,12 @@ func (m Model) View() string {
 			statusLine = m.statusMsg
 		}
 
-		help := dashboardChannelHelp
+		helpText := dashboardChannelHelp
 		if m.dashboard.mode == modeList {
-			help = dashboardListHelp
+			helpText = dashboardListHelp
 		}
 		topBar := dashboardTopBar(streams)
-		return layoutWithBars(topBar, body, statusLine, help, m.width, m.height)
+		return layoutWithBars(topBar, body, statusLine, renderHelp(helpText), m.width, m.height)
 
 	case viewDetail:
 		st := m.orch.Get(m.selectedID)
@@ -1214,9 +1214,9 @@ func (m Model) View() string {
 
 		rows := buildIterationList(st)
 		snaps := st.GetSnapshots()
-		help := detailHelpText(st, m.detail, rows, snaps)
+		helpText := detailHelpText(st, m.detail, rows, snaps)
 		topBar := detailTopBar(st, m.width)
-		return layoutWithBars(topBar, clipLines(content, m.width), statusLine, help, m.width, m.height)
+		return layoutWithBars(topBar, clipLines(content, m.width), statusLine, renderHelp(helpText), m.width, m.height)
 
 	default:
 		return ""
