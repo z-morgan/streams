@@ -123,22 +123,27 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 		b.WriteString("\n")
 	} else {
 		// Two-pane: left = iteration list, right = selected iteration details
-		leftWidth := 25
-		rightWidth := width - leftWidth - 3 // 3 for separator
-		if rightWidth < 10 {
-			rightWidth = 10
+		// Account for border chars: 2 per pane (left+right border) = 4 total
+		leftWidth := 27 // 25 content + 2 border
+		rightWidth := width - leftWidth
+		if rightWidth < 14 {
+			rightWidth = 14
 		}
+		innerRight := rightWidth - 2 // content width inside right border
 
-		left := renderIterationList(rows, dv.iterCursor, leftWidth, dv.focusRight, spinnerFrame)
+		left := renderIterationList(rows, dv.iterCursor, leftWidth-2, dv.focusRight, spinnerFrame)
 
 		var right string
-		cursor := dv.iterCursor
-		if cursor >= 0 && cursor < len(rows) {
-			row := rows[cursor]
+		rightTitle := "Snapshot"
+		cursorIdx := dv.iterCursor
+		if cursorIdx >= 0 && cursorIdx < len(rows) {
+			row := rows[cursorIdx]
 			if row.IsInitialPrompt {
-				right = labelStyle.Render("Initial Prompt") + "\n" + wrapText(st.Task, rightWidth)
+				rightTitle = "Prompt"
+				right = wrapText(st.Task, innerRight)
 			} else if row.IsInProgress {
-				right = renderTailContent(st, rightWidth, paneHeight, dv.tailScroll)
+				rightTitle = "Live Output"
+				right = renderTailContent(st, innerRight, paneHeight, dv.tailScroll)
 				if row.IsBreakpoint {
 					right += "\n" + helpStyle.Render("(breakpoint — press s to continue, g to add guidance)")
 				} else if row.IsPaused {
@@ -149,15 +154,21 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 					}
 				}
 			} else if dv.showArtifact && row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
-				right = renderArtifactDetail(snaps, row.SnapshotIndex, rightWidth)
+				rightTitle = "Artifact"
+				right = renderArtifactDetail(snaps, row.SnapshotIndex, innerRight)
 			} else {
-				right = renderSnapshotDetail(snaps, row.SnapshotIndex, rightWidth)
+				right = renderSnapshotDetail(snaps, row.SnapshotIndex, innerRight)
 			}
 		}
 
 		right = detailStatusMarker(st) + "\n" + right
 
-		b.WriteString(joinPanes(left, right, leftWidth, paneHeight))
+		// Subtract 2 from paneHeight for top+bottom border lines
+		innerHeight := paneHeight - 2
+		if innerHeight < 3 {
+			innerHeight = 3
+		}
+		b.WriteString(joinPanes(left, right, "Iterations", rightTitle, leftWidth, rightWidth, innerHeight, dv.focusRight))
 	}
 
 	return b.String()
@@ -392,37 +403,65 @@ func renderErrorBlock(err *stream.LoopError) string {
 	return errorBlockStyle.Render(msg)
 }
 
-func joinPanes(left, right string, leftWidth, maxLines int) string {
-	leftLines := strings.Split(left, "\n")
-	rightLines := strings.Split(right, "\n")
+// borderedPane renders content inside a labeled bordered box.
+// title appears in the top border. borderColor sets the border color.
+func borderedPane(content, title string, width, height int, borderColor lipgloss.Color) string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(borderColor)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 
-	lineCount := len(leftLines)
-	if len(rightLines) > lineCount {
-		lineCount = len(rightLines)
+	innerWidth := width - 2 // left and right border chars
+
+	// Top border: ╭─ Title ──────╮
+	titleRendered := titleStyle.Render(title)
+	titleVisWidth := lipgloss.Width(titleRendered)
+	fillLen := innerWidth - titleVisWidth - 2 // 2 for "─ " before title
+	if fillLen < 0 {
+		fillLen = 0
 	}
-	if maxLines > 0 && lineCount > maxLines {
-		lineCount = maxLines
+	topLine := borderStyle.Render("╭─") + " " + titleRendered + " " + borderStyle.Render(strings.Repeat("─", fillLen)+"╮")
+
+	// Content lines, padded and clipped to fit
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
 	}
 
 	var b strings.Builder
-	for i := 0; i < lineCount; i++ {
-		l := ""
-		if i < len(leftLines) {
-			l = leftLines[i]
+	b.WriteString(topLine + "\n")
+	for i := 0; i < height; i++ {
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
 		}
-		r := ""
-		if i < len(rightLines) {
-			r = rightLines[i]
-		}
-		// Pad left using visible width (ANSI-aware)
-		visWidth := lipgloss.Width(l)
-		pad := leftWidth - visWidth
+		// Pad to inner width
+		visWidth := lipgloss.Width(line)
+		pad := innerWidth - visWidth
 		if pad < 0 {
+			// Truncate if too wide
+			line = ansi.Truncate(line, innerWidth, "…")
 			pad = 0
 		}
-		b.WriteString(l + strings.Repeat(" ", pad) + " │ " + r + "\n")
+		b.WriteString(borderStyle.Render("│") + line + strings.Repeat(" ", pad) + borderStyle.Render("│") + "\n")
 	}
+	// Bottom border
+	b.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+
 	return b.String()
+}
+
+func joinPanes(left, right string, leftTitle, rightTitle string, leftWidth, rightWidth, maxLines int, focusRight bool) string {
+	leftColor := colorMuted
+	rightColor := colorMuted
+	if focusRight {
+		rightColor = colorPrimary
+	} else {
+		leftColor = colorPrimary
+	}
+
+	leftBox := borderedPane(left, leftTitle, leftWidth, maxLines, leftColor)
+	rightBox := borderedPane(right, rightTitle, rightWidth, maxLines, rightColor)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 }
 
 // clipLines truncates each line to maxWidth visible characters so that
