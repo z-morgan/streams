@@ -82,10 +82,17 @@ var (
 			BorderForeground(colorError).
 			Padding(0, 1)
 
+	colorOverlayBg = lipgloss.Color("234") // overlay background
+
+	overlayTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorPrimary)
+
 	// Guidance overlay
 	overlayStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(colorPrimary).
+			Background(colorOverlayBg).
 			Padding(1, 2)
 
 	helpStyle = lipgloss.NewStyle().

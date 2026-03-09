@@ -1226,21 +1226,23 @@ func (m Model) View() string {
 func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, breakpoints map[int]bool, bpCursor int, width, height int) string {
 	var overlay string
 
+	stepLabel := helpStyle.Render(fmt.Sprintf("  Step %d of 4", step+1))
+
 	switch step {
 	case 0:
-		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += "Title:\n"
 		overlay += titleInput.View() + "\n\n"
 		overlay += helpStyle.Render("ctrl+n: next  esc: cancel")
 	case 1:
-		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n\n"
 		overlay += "Task:\n"
 		overlay += taskInput.View() + "\n\n"
 		overlay += helpStyle.Render("ctrl+n: next  esc: back")
 	case 3:
 		pipeline := selectedPipeline(checked, phaseTree)
-		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
 		overlay += "Set breakpoints (pause between phases):\n\n"
@@ -1264,7 +1266,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		}
 		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
 	default:
-		overlay = titleStyle.Render("New Stream") + "\n\n"
+		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
 		overlay += "Phases:\n"
@@ -1288,18 +1290,13 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: next  esc: back")
 	}
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
+	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderBeadsInitOverlay(width, height int) string {
-	overlay := titleStyle.Render("Initialize Beads") + "\n\n"
+	overlay := overlayTitleStyle.Render("Initialize Beads") + "\n\n"
 	overlay += "This repository doesn't have beads initialized.\n"
 	overlay += "Streams uses beads to track issues for each stream.\n\n"
 	overlay += "Stealth mode keeps beads files out of git history,\n"
@@ -1307,96 +1304,62 @@ func renderBeadsInitOverlay(width, height int) string {
 	overlay += "Use this for repos you don't own.\n\n"
 	overlay += helpStyle.Render("y: stealth mode  n: normal mode  esc: cancel")
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
-
+	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
-	overlay := titleStyle.Render("Guidance") + "\n\n"
+	overlay := overlayTitleStyle.Render("Guidance") + "\n\n"
 	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("ctrl+s: send  esc: cancel")
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
-
+	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderRestartPromptOverlay(width, height int) string {
-	overlay := titleStyle.Render("Restart Stream?") + "\n\n"
+	overlay := overlayTitleStyle.Render("Restart Stream?") + "\n\n"
 	overlay += "The stream was paused for attach.\n"
 	overlay += "Would you like to restart it?\n\n"
 	overlay += helpStyle.Render("y: restart  n: keep paused")
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
-
+	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderConvergeConfirmOverlay(width, height int) string {
-	overlay := titleStyle.Render("Wrap Up Phase") + "\n\n"
+	overlay := overlayTitleStyle.Render("Wrap Up Phase") + "\n\n"
 	overlay += "Skip remaining review iterations and converge\n"
 	overlay += "the current phase as quickly as possible.\n\n"
 	overlay += "The current implement step will finish, but no\n"
 	overlay += "further review work will be filed.\n\n"
 	overlay += helpStyle.Render("w: confirm  esc: cancel")
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
+	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderDeleteConfirmOverlay(name string, width, height int) string {
-	overlay := titleStyle.Render("Delete Stream") + "\n\n"
+	overlay := overlayTitleStyle.Render("Delete Stream") + "\n\n"
 	overlay += fmt.Sprintf("Delete %q?\n\n", name)
 	overlay += helpStyle.Render("d: delete + clean up branch/beads  k: keep branch/beads  esc: cancel")
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
-
+	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderCompleteOverlay(ti textarea.Model, width, height int) string {
-	overlay := titleStyle.Render("Complete Stream") + "\n\n"
+	overlay := overlayTitleStyle.Render("Complete Stream") + "\n\n"
 	overlay += "Branch name:\n"
 	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("ctrl+s: complete  esc: cancel")
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
+	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderReviseOverlay(phases []string, cursor, step int, feedback textarea.Model, width, height int) string {
-	overlay := titleStyle.Render("Revise Stream") + "\n\n"
+	overlay := overlayTitleStyle.Render("Revise Stream") + "\n\n"
 
 	if step == 1 {
 		if cursor >= 0 && cursor < len(phases) {
@@ -1421,13 +1384,25 @@ func renderReviseOverlay(phases []string, cursor, step int, feedback textarea.Mo
 		overlay += "\n" + helpStyle.Render("j/k: navigate  enter: select  esc: cancel")
 	}
 
-	maxWidth := width - 6
-	if maxWidth < 40 {
-		maxWidth = 40
+	cap := 80
+	if step == 1 {
+		cap = 100
 	}
-
-	box := overlayStyle.Width(maxWidth).Render(overlay)
+	box := overlayStyle.Width(overlayWidth(width, cap)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// overlayWidth returns a capped overlay width. Standard overlays cap at 80,
+// text-heavy overlays (with textareas) cap at 100.
+func overlayWidth(termWidth, maxCap int) int {
+	w := termWidth - 6
+	if w > maxCap {
+		w = maxCap
+	}
+	if w < 40 {
+		w = 40
+	}
+	return w
 }
 
 // isPausedAtReview returns true when the stream is paused and converged at
