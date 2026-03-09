@@ -53,45 +53,83 @@ func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame stri
 	if len(streams) == 0 {
 		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
 		b.WriteString("\n")
-	} else {
-		for i, st := range streams {
-			prefix := "  "
-			style := normalRowStyle
-			if i == cursor {
-				prefix = cursorStyle.Render("> ")
-				style = selectedRowStyle
-			}
+		return b.String()
+	}
 
-			status := statusIndicator(st)
-			phase := currentPhase(st)
-			iter := fmt.Sprintf("iter %d", st.GetIteration())
-			guidanceCount := st.GetGuidanceCount()
+	// Column widths
+	const statusCol = 14
+	const phaseCol = 12
+	const iterCol = 10
 
-			spinner := "  "
-			if st.GetStatus() == stream.StatusRunning {
-				spinner = spinnerFrame + " "
-			}
+	// Dynamic name width: find longest name, cap at 40
+	nameCol := 10
+	for _, st := range streams {
+		if n := len(st.Name); n > nameCol {
+			nameCol = n
+		}
+	}
+	if nameCol > 40 {
+		nameCol = 40
+	}
 
-			worktree := ""
-			if st.WorkTree != "" {
-				worktree = helpStyle.Render("worktree: "+st.Branch) + "  "
-			}
+	// Header
+	header := fmt.Sprintf("  %-*s  %-*s  %-*s  %s",
+		nameCol, "Name",
+		statusCol, "Status",
+		phaseCol, "Phase",
+		"Iter",
+	)
+	b.WriteString(helpStyle.Render(header))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(strings.Repeat("─", nameCol+statusCol+phaseCol+iterCol+8)))
+	b.WriteString("\n")
 
-			row := fmt.Sprintf("%s%-20s %s%s  %-10s  %s%s",
-				prefix,
-				truncate(st.Name, 20),
-				worktree,
-				status,
-				phase,
-				spinner,
-				iter,
-			)
+	accentStyle := lipgloss.NewStyle().Foreground(colorPrimary)
 
-			if guidanceCount > 0 {
-				row += fmt.Sprintf("  [%d queued]", guidanceCount)
-			}
+	for i, st := range streams {
+		selected := i == cursor
+		accent := "  "
+		style := normalRowStyle
+		if selected {
+			accent = accentStyle.Render("▎ ")
+			style = selectedRowStyle
+		}
 
-			b.WriteString(style.Render(row))
+		status := statusIndicator(st)
+		phase := currentPhase(st)
+		iter := fmt.Sprintf("iter %d", st.GetIteration())
+
+		spinner := "  "
+		if st.GetStatus() == stream.StatusRunning {
+			spinner = spinnerFrame + " "
+		}
+
+		name := truncate(st.Name, nameCol)
+		// Pad status to visual width (ANSI codes inflate byte count)
+		statusPad := statusCol - lipgloss.Width(status)
+		if statusPad < 0 {
+			statusPad = 0
+		}
+		paddedStatus := status + strings.Repeat(" ", statusPad)
+
+		row := fmt.Sprintf("%s%-*s  %s  %-*s  %s%s",
+			accent,
+			nameCol, name,
+			paddedStatus,
+			phaseCol, phase,
+			spinner, iter,
+		)
+
+		if gc := st.GetGuidanceCount(); gc > 0 {
+			row += fmt.Sprintf("  [%d queued]", gc)
+		}
+
+		b.WriteString(style.Render(row))
+		b.WriteString("\n")
+
+		if selected && st.WorkTree != "" {
+			worktree := "    " + metadataStyle.Render("worktree: "+st.Branch)
+			b.WriteString(worktree)
 			b.WriteString("\n")
 		}
 	}
