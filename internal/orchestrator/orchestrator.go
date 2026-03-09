@@ -254,10 +254,11 @@ func (o *Orchestrator) Start(id string) error {
 	go func() {
 		defer close(doneCh)
 
+		promptDirs := o.promptOverrideDirs(st.ID)
 		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, factory, func(s *stream.Stream) {
 			o.checkpoint(s)
 			o.emit(Event{StreamID: s.ID, Kind: EventCheckpoint})
-		})
+		}, promptDirs...)
 
 		// Persist final state.
 		o.checkpoint(st)
@@ -496,6 +497,30 @@ func (o *Orchestrator) emit(e Event) {
 	if sink != nil {
 		go sink.Send(e)
 	}
+}
+
+// promptOverrideDirs returns the per-stream and project prompt override directories.
+// Checked in order: per-stream → project (before global user dir).
+func (o *Orchestrator) promptOverrideDirs(streamID string) []string {
+	return []string{
+		filepath.Join(o.store.Root, "streams", streamID, "prompts"),
+		filepath.Join(o.store.Root, "prompts"),
+	}
+}
+
+// StreamDataDir returns the on-disk data directory for a stream.
+func (o *Orchestrator) StreamDataDir(streamID string) string {
+	return filepath.Join(o.store.Root, "streams", streamID)
+}
+
+// StoreRoot returns the store's root directory.
+func (o *Orchestrator) StoreRoot() string {
+	return o.store.Root
+}
+
+// RepoDir returns the repository directory.
+func (o *Orchestrator) RepoDir() string {
+	return o.config.RepoDir
 }
 
 // phaseFactory returns a PhaseFactory that handles config-driven phases.

@@ -118,6 +118,66 @@ func TestLoadPrompt_RebaseTemplate(t *testing.T) {
 	}
 }
 
+func TestLoadPrompt_OverrideDirsPrecedence(t *testing.T) {
+	// Set up three override dirs: per-stream, project, and global.
+	streamDir := t.TempDir()
+	projectDir := t.TempDir()
+	globalDir := t.TempDir()
+
+	original := userPromptsDir
+	userPromptsDir = func() string { return globalDir }
+	defer func() { userPromptsDir = original }()
+
+	// Write overrides at all three levels.
+	os.WriteFile(filepath.Join(globalDir, "plan-implement.tmpl"), []byte("global: {{.Task}}"), 0o644)
+	os.WriteFile(filepath.Join(projectDir, "plan-implement.tmpl"), []byte("project: {{.Task}}"), 0o644)
+	os.WriteFile(filepath.Join(streamDir, "plan-implement.tmpl"), []byte("stream: {{.Task}}"), 0o644)
+
+	data := PromptData{
+		Task:         "test task",
+		OverrideDirs: []string{streamDir, projectDir},
+	}
+
+	// Per-stream should win.
+	prompt, err := LoadPrompt("plan", "implement", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "stream: test task" {
+		t.Errorf("expected per-stream override, got %q", prompt)
+	}
+
+	// Remove per-stream override — project should win.
+	os.Remove(filepath.Join(streamDir, "plan-implement.tmpl"))
+	prompt, err = LoadPrompt("plan", "implement", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "project: test task" {
+		t.Errorf("expected project override, got %q", prompt)
+	}
+
+	// Remove project override — global should win.
+	os.Remove(filepath.Join(projectDir, "plan-implement.tmpl"))
+	prompt, err = LoadPrompt("plan", "implement", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "global: test task" {
+		t.Errorf("expected global override, got %q", prompt)
+	}
+
+	// Remove global override — embedded default should be used.
+	os.Remove(filepath.Join(globalDir, "plan-implement.tmpl"))
+	prompt, err = LoadPrompt("plan", "implement", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "drafting a plan") {
+		t.Error("expected embedded default when no overrides present")
+	}
+}
+
 func TestLoadPrompt_MalformedUserTemplate(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(

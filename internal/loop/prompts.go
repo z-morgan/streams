@@ -29,6 +29,10 @@ type PromptData struct {
 	// Polish phase fields.
 	BaseSHA string // stream's rebase target, used by polish templates for git commands
 	Commits string // pre-formatted per-commit sections for commit-scoped slots
+
+	// OverrideDirs are checked in order before the global user prompts dir.
+	// Typically: [per-stream dir, project dir].
+	OverrideDirs []string
 }
 
 // userPromptsDir returns the directory to check for user prompt overrides.
@@ -44,12 +48,23 @@ func defaultUserPromptsDir() string {
 }
 
 // LoadPrompt loads and renders a prompt template for the given phase and step.
-// It checks for a user override at ~/.config/streams/prompts/<phase>-<step>.tmpl,
-// falling back to the embedded default.
+// It checks override directories in order (per-stream, project), then the global
+// user override at ~/.config/streams/prompts/, falling back to the embedded default.
 func LoadPrompt(phase, step string, data PromptData) (string, error) {
 	name := phase + "-" + step + ".tmpl"
 
-	// Check for user override.
+	// Check override dirs in order (per-stream → project).
+	for _, dir := range data.OverrideDirs {
+		if dir == "" {
+			continue
+		}
+		overridePath := filepath.Join(dir, name)
+		if content, err := os.ReadFile(overridePath); err == nil {
+			return renderTemplate(name, string(content), data)
+		}
+	}
+
+	// Check global user override.
 	dir := userPromptsDir()
 	if dir != "" {
 		userPath := filepath.Join(dir, name)
@@ -86,6 +101,11 @@ func ExportPrompt(name string) (string, error) {
 		return "", fmt.Errorf("unknown prompt template: %s", name)
 	}
 	return string(content), nil
+}
+
+// GlobalPromptsDir returns the global user prompt override directory path.
+func GlobalPromptsDir() string {
+	return userPromptsDir()
 }
 
 func renderTemplate(name, content string, data PromptData) (string, error) {

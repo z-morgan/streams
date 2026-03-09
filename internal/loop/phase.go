@@ -29,11 +29,12 @@ func (t Transition) String() string {
 
 // PhaseContext provides the loop context to a macro-phase for a single iteration.
 type PhaseContext struct {
-	Stream       *stream.Stream
-	Runtime      runtime.Runtime
-	WorkDir      string
-	Iteration    int
-	OrderedSteps string // formatted step list injected into implement prompt
+	Stream             *stream.Stream
+	Runtime            runtime.Runtime
+	WorkDir            string
+	Iteration          int
+	OrderedSteps       string   // formatted step list injected into implement prompt
+	PromptOverrideDirs []string // per-stream and project prompt override directories
 }
 
 // IterationResult captures the outcome of a single iteration for convergence detection.
@@ -65,6 +66,7 @@ func promptDataFromContext(ctx PhaseContext) PromptData {
 		ParentID:     ctx.Stream.BeadsParentID,
 		Iteration:    ctx.Iteration,
 		OrderedSteps: ctx.OrderedSteps,
+		OverrideDirs: ctx.PromptOverrideDirs,
 	}
 }
 

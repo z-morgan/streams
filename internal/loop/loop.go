@@ -29,13 +29,15 @@ type PhaseFactory func(name string) (MacroPhase, error)
 // converges, an error occurs, the context is cancelled, or maxIterations is
 // reached (0 means unlimited). Outcome is reflected in stream state
 // (StatusPaused+Converged, StatusPaused+LastError, or StatusStopped).
-func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, git GitQuerier, maxIterations int, factory PhaseFactory, onCheckpoint func(*stream.Stream)) {
+// promptOverrideDirs are checked in order before the global user prompts dir
+// (typically [per-stream dir, project dir]).
+func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, git GitQuerier, maxIterations int, factory PhaseFactory, onCheckpoint func(*stream.Stream), promptOverrideDirs ...string) {
 	s.SetStatus(stream.StatusRunning)
 	s.ClearOutput()
 
 	// Slotted phases (e.g. polish) bypass the normal implement→review cycle.
 	if slotted, ok := phase.(SlottedPhase); ok {
-		runSlots(ctx, s, slotted, rt, git, onCheckpoint)
+		runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs)
 		return
 	}
 
@@ -58,7 +60,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 			// If the next phase is slotted, run its slots and return.
 			if slotted, ok := nextPhase.(SlottedPhase); ok {
-				runSlots(ctx, s, slotted, rt, git, onCheckpoint)
+				runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs)
 				return
 			}
 		} else {
@@ -69,6 +71,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	}
 
 	var pendingGuidance []stream.Guidance
+	startIteration := s.GetIteration()
 
 	for {
 		// Check for cancellation at top of loop.
@@ -77,8 +80,15 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
-		// Check max iterations.
-		if maxIterations > 0 && s.GetIteration() >= maxIterations {
+		// Check max iterations relative to the start of this session so that
+		// resuming a paused stream gets a fresh budget rather than immediately
+		// re-pausing at the same limit.
+		if maxIterations > 0 && s.GetIteration()-startIteration >= maxIterations {
+			s.SetLastError(&stream.LoopError{
+				Kind:    stream.ErrMaxIterations,
+				Step:    stream.StepImplement,
+				Message: fmt.Sprintf("iteration limit (%d) reached", maxIterations),
+			})
 			s.SetStatus(stream.StatusPaused)
 			return
 		}
@@ -93,11 +103,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 
 		pctx := PhaseContext{
-			Stream:       s,
-			Runtime:      rt,
-			WorkDir:      s.WorkTree,
-			Iteration:    iteration,
-			OrderedSteps: FormatSteps(steps),
+			Stream:             s,
+			Runtime:            rt,
+			WorkDir:            s.WorkTree,
+			Iteration:          iteration,
+			OrderedSteps:       FormatSteps(steps),
+			PromptOverrideDirs: promptOverrideDirs,
 		}
 
 		// --- StepImplement ---
@@ -285,7 +296,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				// If the next phase is slotted (e.g. polish), run its slots
 				// and return instead of continuing the normal iteration loop.
 				if slotted, ok := nextPhase.(SlottedPhase); ok {
-					runSlots(ctx, s, slotted, rt, git, onCheckpoint)
+					runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs)
 					return
 				}
 				continue
@@ -360,7 +371,7 @@ func setDiff(a, b []string) []string {
 
 // runSlots drives a SlottedPhase by iterating over its slots serially.
 // Each slot gets its own prompt, agent invocation, and snapshot.
-func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runtime.Runtime, git GitQuerier, onCheckpoint func(*stream.Stream)) {
+func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runtime.Runtime, git GitQuerier, onCheckpoint func(*stream.Stream), promptOverrideDirs []string) {
 	slots := phase.Slots()
 	var firstErr *stream.LoopError
 
@@ -374,10 +385,11 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 		s.SetIterStep(stream.StepImplement)
 
 		pctx := PhaseContext{
-			Stream:    s,
-			Runtime:   rt,
-			WorkDir:   s.WorkTree,
-			Iteration: i,
+			Stream:             s,
+			Runtime:            rt,
+			WorkDir:            s.WorkTree,
+			Iteration:          i,
+			PromptOverrideDirs: promptOverrideDirs,
 		}
 
 		headBefore, _ := git.HeadSHA(s.WorkTree)

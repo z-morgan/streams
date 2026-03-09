@@ -179,7 +179,12 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 		return 1
 	}
 
-	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase, nil)
+	storeRoot := orch.StoreRoot()
+	promptDirs := []string{
+		filepath.Join(storeRoot, "streams", st.ID, "prompts"),
+		filepath.Join(storeRoot, "prompts"),
+	}
+	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase, nil, promptDirs...)
 
 	switch {
 	case st.GetStatus() == stream.StatusStopped:
