@@ -446,6 +446,23 @@ func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) 
 	return o.Start(id)
 }
 
+// Converge sets the ConvergeASAP flag on a running stream, causing the loop
+// to skip the next review step and converge the current phase.
+func (o *Orchestrator) Converge(id string) error {
+	o.mu.RLock()
+	st := o.streams[id]
+	_, running := o.cancels[id]
+	o.mu.RUnlock()
+	if st == nil {
+		return fmt.Errorf("stream %q not found", id)
+	}
+	if !running {
+		return fmt.Errorf("stream %q is not running", id)
+	}
+	st.SetConvergeASAP(true)
+	return nil
+}
+
 // SendGuidance queues a guidance message for a stream.
 func (o *Orchestrator) SendGuidance(id string, text string) error {
 	st := o.Get(id)
