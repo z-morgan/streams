@@ -1,0 +1,1 @@
+time=2026-03-07T00:52:48.964-08:00 level=ERROR msg="TUI error" err="could not open a new TTY: open /dev/tty: device not configured"

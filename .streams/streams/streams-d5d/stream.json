@@ -1,0 +1,20 @@
+{
+  "id": "streams-d5d",
+  "name": "test stream",
+  "task": "test stream",
+  "mode": "Autonomous",
+  "status": "Created",
+  "pipeline": [
+    "coding"
+  ],
+  "pipeline_index": 0,
+  "iter_step": "Implement",
+  "iteration": 0,
+  "converged": false,
+  "beads_parent_id": "streams-d5d",
+  "base_sha": "67d5a7523ff0ac21c769a5b6867af14b6d69b1c7",
+  "branch": "streams/streams-d5d",
+  "worktree": "/Users/zmorgan/zm_apps/streams/.streams/worktrees/streams-d5d",
+  "created_at": "2026-03-06T00:49:37.961754-08:00",
+  "updated_at": "2026-03-06T00:49:37.961754-08:00"
+}

@@ -6,11 +6,12 @@ import "fmt"
 type ErrorKind int
 
 const (
-	ErrRuntime    ErrorKind = iota // CLI exited non-zero (crash, timeout)
-	ErrBudget                      // Budget limit hit
-	ErrAutosquash                  // git rebase --autosquash failed (merge conflict)
-	ErrNoProgress                  // Implement step closed zero beads
-	ErrInfra                       // Disk, git worktree, beads CLI failure
+	ErrRuntime       ErrorKind = iota // CLI exited non-zero (crash, timeout)
+	ErrBudget                        // Budget limit hit
+	ErrAutosquash                    // git rebase --autosquash failed (merge conflict)
+	ErrNoProgress                    // Implement step closed zero beads
+	ErrInfra                         // Disk, git worktree, beads CLI failure
+	ErrMaxIterations                 // Iteration limit reached
 )
 
 var errorKindNames = [...]string{
@@ -19,6 +20,7 @@ var errorKindNames = [...]string{
 	"Autosquash",
 	"NoProgress",
 	"Infra",
+	"MaxIterations",
 }
 
 func (k ErrorKind) String() string {
