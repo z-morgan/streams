@@ -124,7 +124,7 @@ func (o *Orchestrator) InitBeads(stealth bool) error {
 
 // Create creates a new stream backed by a beads parent issue and git worktree.
 // If pipeline is nil/empty, the global config pipeline is used.
-func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int) (*stream.Stream, error) {
+func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int, notify stream.NotifySettings) (*stream.Stream, error) {
 	repoDir := o.config.RepoDir
 
 	parentID, err := createBeadsParent(title, repoDir)
@@ -165,6 +165,7 @@ func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints
 		Pipeline:      pipeline,
 		PipelineIndex: 0,
 		Breakpoints:   breakpoints,
+		Notify:        notify,
 		BeadsParentID: parentID,
 		BaseSHA:       baseSHA,
 		Branch:        branch,
@@ -272,6 +273,15 @@ func (o *Orchestrator) Start(id string) error {
 			o.emit(Event{StreamID: id, Kind: EventError, Error: st.LastError})
 		default:
 			o.emit(Event{StreamID: id, Kind: EventStopped})
+		}
+
+		// Fire user-configured notifications.
+		notify := st.GetNotify()
+		switch {
+		case st.Converged:
+			fireNotifications(st.Name, EventConverged, notify)
+		case st.LastError != nil:
+			fireNotifications(st.Name, EventError, notify)
 		}
 
 		o.mu.Lock()
@@ -535,6 +545,42 @@ func (o *Orchestrator) IsRunning(id string) bool {
 	_, ok := o.cancels[id]
 	o.mu.RUnlock()
 	return ok
+}
+
+// fireNotifications sends enabled notification types for the given stream event.
+func fireNotifications(name string, kind EventKind, notify stream.NotifySettings) {
+	var label string
+	switch kind {
+	case EventConverged:
+		label = "converged"
+	case EventError:
+		label = "error"
+	default:
+		return
+	}
+
+	if notify.Bell {
+		if f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
+			f.Write([]byte("\a"))
+			f.Close()
+		}
+	}
+
+	if notify.Flash {
+		if f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
+			f.Write([]byte("\033[?5h"))
+			time.Sleep(150 * time.Millisecond)
+			f.Write([]byte("\033[?5l"))
+			f.Close()
+		}
+	}
+
+	if notify.System {
+		title := fmt.Sprintf("Stream %s: %s", label, name)
+		exec.Command("osascript", "-e",
+			fmt.Sprintf(`display notification "%s" with title "Streams"`, title),
+		).Run()
+	}
 }
 
 // checkpoint persists the stream and its new snapshots.
