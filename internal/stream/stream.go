@@ -103,6 +103,7 @@ type Stream struct {
 	LastError     *LoopError
 	Snapshots     []Snapshot
 	Guidance      []Guidance
+	ConvergeASAP  bool     // one-shot flag: skip next review to force convergence
 	OutputLines   []string // ring buffer of recent CLI output for tail view
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -273,6 +274,28 @@ func (s *Stream) DrainGuidance() []Guidance {
 	s.Guidance = nil
 	s.mu.Unlock()
 	return g
+}
+
+func (s *Stream) SetConvergeASAP(v bool) {
+	s.mu.Lock()
+	s.ConvergeASAP = v
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetConvergeASAP() bool {
+	s.mu.RLock()
+	v := s.ConvergeASAP
+	s.mu.RUnlock()
+	return v
+}
+
+// DrainConvergeASAP atomically reads and clears the ConvergeASAP flag.
+func (s *Stream) DrainConvergeASAP() bool {
+	s.mu.Lock()
+	v := s.ConvergeASAP
+	s.ConvergeASAP = false
+	s.mu.Unlock()
+	return v
 }
 
 // AppendOutput adds a line to the output ring buffer, dropping the oldest
