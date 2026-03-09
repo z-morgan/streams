@@ -145,6 +145,9 @@ type Model struct {
 	pendingPipeline    []string // pipeline stashed while waiting for stealth answer
 	pendingBreakpoints []int    // breakpoints stashed while waiting for stealth answer
 
+	// Converge confirmation overlay state.
+	showConvergeConfirm bool
+
 	// Complete overlay state (review phase).
 	showComplete  bool
 	completeInput textarea.Model
@@ -303,6 +306,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle new stream overlay input first if active.
 	if m.showNewStream {
 		return m.updateNewStream(msg)
+	}
+
+	// Handle converge confirmation overlay if active.
+	if m.showConvergeConfirm {
+		return m.updateConvergeConfirm(msg)
 	}
 
 	// Handle complete overlay if active.
@@ -626,6 +634,12 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+	case "w":
+		if st != nil && st.GetStatus() == stream.StatusRunning {
+			m.showConvergeConfirm = true
+			return m, nil
+		}
+
 	case "a":
 		if st == nil || m.interrupting {
 			return m, nil
@@ -933,6 +947,28 @@ func (m Model) updateRestartPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateConvergeConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "w":
+			m.showConvergeConfirm = false
+			if m.selectedID != "" {
+				if err := m.orch.Converge(m.selectedID); err != nil {
+					m.errorMsg = "Converge error: " + err.Error()
+				} else {
+					m.statusMsg = "Wrapping up phase..."
+				}
+			}
+			return m, nil
+		case "esc":
+			m.showConvergeConfirm = false
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1077,6 +1113,10 @@ func (m Model) View() string {
 
 	if m.showNewStream {
 		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamBreakpoints, m.newStreamBPCursor, m.width, m.height)
+	}
+
+	if m.showConvergeConfirm {
+		return renderConvergeConfirmOverlay(m.width, m.height)
 	}
 
 	if m.showComplete {
@@ -1271,6 +1311,23 @@ func renderRestartPromptOverlay(width, height int) string {
 
 	box := overlayStyle.Width(maxWidth).Render(overlay)
 
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderConvergeConfirmOverlay(width, height int) string {
+	overlay := titleStyle.Render("Wrap Up Phase") + "\n\n"
+	overlay += "Skip remaining review iterations and converge\n"
+	overlay += "the current phase as quickly as possible.\n\n"
+	overlay += "The current implement step will finish, but no\n"
+	overlay += "further review work will be filed.\n\n"
+	overlay += helpStyle.Render("w: confirm  esc: cancel")
+
+	maxWidth := width - 6
+	if maxWidth < 40 {
+		maxWidth = 40
+	}
+
+	box := overlayStyle.Width(maxWidth).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 

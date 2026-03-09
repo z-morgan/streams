@@ -149,7 +149,11 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 				if row.IsBreakpoint {
 					right += "\n" + helpStyle.Render("(breakpoint — press s to continue, g to add guidance)")
 				} else if row.IsPaused {
-					right += "\n" + helpStyle.Render("(paused)")
+					if err := st.GetLastError(); err != nil {
+						right += "\n" + renderErrorBlock(err)
+					} else {
+						right += "\n" + helpStyle.Render("(paused)")
+					}
 				}
 			} else if dv.showArtifact && row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
 				right = renderArtifactDetail(snaps, row.SnapshotIndex, rightWidth)
@@ -198,7 +202,12 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 		return "j/k: iterations  c: complete  r: revise  g: guidance  d: delete  q/esc: back"
 	}
 
-	help := "j/k: iterations  enter: focus output  a: attach  s: start  x: stop  g: guidance  q/esc: back"
+	var help string
+	if status == stream.StatusRunning {
+		help = "j/k: iterations  enter: focus output  a: attach  w: wrap up  x: stop  g: guidance  q/esc: back"
+	} else {
+		help = "j/k: iterations  enter: focus output  a: attach  s: start  x: stop  g: guidance  q/esc: back"
+	}
 
 	// Show artifact toggle hint when the selected snapshot has an artifact.
 	cursor := dv.iterCursor
