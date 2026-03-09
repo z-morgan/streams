@@ -22,6 +22,19 @@ var (
 		"Completed": colorSuccess,
 	}
 
+	// Status bar styles
+	topBarStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorPrimary).
+			Background(colorSubtle).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	bottomBarStyle = lipgloss.NewStyle().
+			Background(colorSubtle).
+			PaddingLeft(1).
+			PaddingRight(1)
+
 	// Dashboard styles
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).

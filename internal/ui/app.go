@@ -1215,7 +1215,7 @@ func (m Model) View() string {
 		rows := buildIterationList(st)
 		snaps := st.GetSnapshots()
 		help := detailHelpText(st, m.detail, rows, snaps)
-		topBar := detailTopBar(st)
+		topBar := detailTopBar(st, m.width)
 		return layoutWithBars(topBar, clipLines(content, m.width), statusLine, help, m.width, m.height)
 
 	default:

@@ -370,11 +370,17 @@ func dashboardTopBar(streams []*stream.Stream) string {
 }
 
 // detailTopBar returns the top bar content for the detail view.
-func detailTopBar(st *stream.Stream) string {
+func detailTopBar(st *stream.Stream, width int) string {
 	if st == nil {
 		return "Streams › ?"
 	}
 	phase := currentPhase(st)
 	iter := fmt.Sprintf("iter %d", st.GetIteration())
-	return "Streams › " + st.Name + "  " + helpStyle.Render(phase+" · "+iter)
+	suffix := phase + " · " + iter
+	// "Streams › " = 10 visual, suffix + spacing = len+4, padding = 2
+	nameMax := width - 10 - len(suffix) - 4 - 2
+	if nameMax < 10 {
+		nameMax = 10
+	}
+	return "Streams › " + truncate(st.Name, nameMax) + "  " + helpStyle.Render(suffix)
 }
