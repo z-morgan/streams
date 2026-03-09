@@ -75,12 +75,21 @@ var (
 			Bold(true).
 			Foreground(colorSecondary)
 
-	errorBlockStyle = lipgloss.NewStyle().
+	// errorBarStyle is used for inline error messages in the status bar.
+	errorBarStyle = lipgloss.NewStyle().
 			Foreground(colorError).
 			Bold(true).
-			BorderStyle(lipgloss.RoundedBorder()).
+			Background(lipgloss.Color("52")). // dark red
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	// errorBlockStyle is used for structured error blocks in detail views.
+	errorBlockStyle = lipgloss.NewStyle().
+			Foreground(colorError).
+			BorderStyle(lipgloss.Border{Left: "▌"}).
+			BorderLeft(true).
 			BorderForeground(colorError).
-			Padding(0, 1)
+			PaddingLeft(1)
 
 	colorOverlayBg = lipgloss.Color("234") // overlay background
 

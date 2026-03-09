@@ -502,11 +502,15 @@ func renderArtifactDetail(snaps []stream.Snapshot, cursor int, width int) string
 }
 
 func renderErrorBlock(err *stream.LoopError) string {
-	msg := fmt.Sprintf("Error [%s at %s]: %s", err.Kind, err.Step, err.Message)
+	fieldStyle := lipgloss.NewStyle().Foreground(colorSecondary)
+	var b strings.Builder
+	b.WriteString(fieldStyle.Render("Kind:") + " " + err.Kind.String() + "\n")
+	b.WriteString(fieldStyle.Render("Step:") + " " + err.Step.String() + "\n")
+	b.WriteString(fieldStyle.Render("Message:") + " " + err.Message)
 	if err.Detail != "" {
-		msg += "\n" + err.Detail
+		b.WriteString("\n" + fieldStyle.Render("Detail:") + "\n" + err.Detail)
 	}
-	return errorBlockStyle.Render(msg)
+	return errorBlockStyle.Render(b.String())
 }
 
 // borderedPane renders content inside a labeled bordered box.

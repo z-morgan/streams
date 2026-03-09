@@ -169,8 +169,9 @@ type Model struct {
 	// Ephemeral status message shown at bottom of dashboard.
 	statusMsg string
 
-	// Persistent error message, cleared on next keypress.
+	// Ephemeral error message, auto-clears after errorTTL ticks.
 	errorMsg string
+	errorTTL int // spinner ticks remaining until errorMsg clears
 }
 
 // streamCreatedMsg is sent when orch.Create finishes.
@@ -278,6 +279,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle spinner/tail ticks globally so overlay handlers can't break the chain.
 	if _, ok := msg.(spinnerTickMsg); ok {
 		m.spinnerFrame++
+		if m.errorTTL > 0 {
+			m.errorTTL--
+			if m.errorTTL == 0 {
+				m.errorMsg = ""
+			}
+		}
 		return m, spinnerTick()
 	}
 	if _, ok := msg.(tailTickMsg); ok {
@@ -345,7 +352,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case beadsInitDoneMsg:
 		if msg.err != nil {
 			m.creating = false
-			m.errorMsg = "Error initializing beads: " + msg.err.Error()
+			m = m.withError("Error initializing beads: " + msg.err.Error())
 			return m, nil
 		}
 		title := m.pendingTitle
@@ -361,18 +368,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamCreatedMsg:
 		m.creating = false
 		if msg.err != nil {
-			m.errorMsg = "Error creating stream: " + msg.err.Error()
+			m = m.withError("Error creating stream: " + msg.err.Error())
 			return m, nil
 		}
 		if err := m.orch.Start(msg.stream.ID); err != nil {
-			m.errorMsg = "Stream created but failed to start: " + err.Error()
+			m = m.withError("Stream created but failed to start: " + err.Error())
 		}
 		return m, nil
 
 	case interruptDoneMsg:
 		m.interrupting = false
 		if msg.err != nil {
-			m.errorMsg = "Interrupt failed: " + msg.err.Error()
+			m = m.withError("Interrupt failed: " + msg.err.Error())
 			return m, nil
 		}
 		st := m.orch.Get(m.selectedID)
@@ -387,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case claudeExitMsg:
 		if msg.err != nil {
-			m.errorMsg = "Attach session exited with error: " + msg.err.Error()
+			m = m.withError("Attach session exited with error: " + msg.err.Error())
 		}
 		if m.attachedFromRunning {
 			m.showRestartPrompt = true
@@ -397,7 +404,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamCompletedMsg:
 		if msg.err != nil {
-			m.errorMsg = "Error completing stream: " + msg.err.Error()
+			m = m.withError("Error completing stream: " + msg.err.Error())
 			return m, nil
 		}
 		m.view = viewDashboard
@@ -405,20 +412,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamRevisedMsg:
 		if msg.err != nil {
-			m.errorMsg = "Error revising stream: " + msg.err.Error()
+			m = m.withError("Error revising stream: " + msg.err.Error())
 			return m, nil
 		}
 		return m, nil
 
 	case diagnoseExitMsg:
 		if msg.err != nil {
-			m.errorMsg = "Diagnosis session exited with error: " + msg.err.Error()
+			m = m.withError("Diagnosis session exited with error: " + msg.err.Error())
 		}
 		return m, nil
 
 	case streamDeletedMsg:
 		if msg.err != nil {
-			m.errorMsg = "Error deleting stream: " + msg.err.Error()
+			m = m.withError("Error deleting stream: " + msg.err.Error())
 			return m, nil
 		}
 		streams := m.orch.List()
@@ -959,7 +966,7 @@ func (m Model) updateRestartPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showRestartPrompt = false
 			if m.selectedID != "" {
 				if err := m.orch.Start(m.selectedID); err != nil {
-					m.errorMsg = "Restart error: " + err.Error()
+					m = m.withError("Restart error: " + err.Error())
 				}
 			}
 			return m, nil
@@ -979,7 +986,7 @@ func (m Model) updateConvergeConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showConvergeConfirm = false
 			if m.selectedID != "" {
 				if err := m.orch.Converge(m.selectedID); err != nil {
-					m.errorMsg = "Converge error: " + err.Error()
+					m = m.withError("Converge error: " + err.Error())
 				} else {
 					m.statusMsg = "Wrapping up phase..."
 				}
@@ -1182,7 +1189,7 @@ func (m Model) View() string {
 			statusLine = "Creating stream..."
 		}
 		if m.errorMsg != "" {
-			statusLine = errorBlockStyle.Render(m.errorMsg)
+			statusLine = errorBarStyle.Render(m.errorMsg)
 		}
 		if m.statusMsg != "" {
 			statusLine = m.statusMsg
@@ -1206,7 +1213,7 @@ func (m Model) View() string {
 
 		var statusLine string
 		if m.errorMsg != "" {
-			statusLine = errorBlockStyle.Render(m.errorMsg)
+			statusLine = errorBarStyle.Render(m.errorMsg)
 		}
 		if m.statusMsg != "" {
 			statusLine = m.statusMsg
@@ -1457,6 +1464,12 @@ func (m Model) setStatus(msg string) (Model, tea.Cmd) {
 	return m, clearStatusAfter(2 * time.Second)
 }
 
+func (m Model) withError(msg string) Model {
+	m.errorMsg = msg
+	m.errorTTL = 60 // ~5 seconds at 80ms/tick
+	return m
+}
+
 // inputWidth returns the usable width for text inputs inside overlay boxes.
 // Accounts for the outer margin (6), overlay border (2), and overlay padding (4).
 func (m Model) inputWidth() int {
@@ -1511,7 +1524,7 @@ func (m Model) startDiagnose(id string) (tea.Model, tea.Cmd) {
 	}
 	cmd, err := m.orch.Diagnose(id)
 	if err != nil {
-		m.errorMsg = "Diagnose error: " + err.Error()
+		m = m.withError("Diagnose error: " + err.Error())
 		return m, nil
 	}
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
