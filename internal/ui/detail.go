@@ -168,7 +168,21 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 		if innerHeight < 3 {
 			innerHeight = 3
 		}
-		b.WriteString(joinPanes(left, right, "Iterations", rightTitle, leftWidth, rightWidth, innerHeight, dv.focusRight))
+
+		// Scroll position footer for live output
+		var rightFooter string
+		if cursorIdx >= 0 && cursorIdx < len(rows) && rows[cursorIdx].IsInProgress {
+			outputLines := st.GetOutputLines()
+			totalLines := len(outputLines)
+			if totalLines > 0 && dv.tailScroll > 0 {
+				endLine := totalLines - dv.tailScroll
+				if endLine < 0 {
+					endLine = 0
+				}
+				rightFooter = fmt.Sprintf("line %d/%d", endLine, totalLines)
+			}
+		}
+		b.WriteString(joinPanes(left, right, "Iterations", rightTitle, rightFooter, leftWidth, rightWidth, innerHeight, dv.focusRight))
 	}
 
 	return b.String()
@@ -496,8 +510,8 @@ func renderErrorBlock(err *stream.LoopError) string {
 }
 
 // borderedPane renders content inside a labeled bordered box.
-// title appears in the top border. borderColor sets the border color.
-func borderedPane(content, title string, width, height int, borderColor lipgloss.Color) string {
+// title appears in the top border. footer (if non-empty) appears in the bottom border.
+func borderedPane(content, title, footer string, width, height int, borderColor lipgloss.Color) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(borderColor)
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 
@@ -535,13 +549,23 @@ func borderedPane(content, title string, width, height int, borderColor lipgloss
 		}
 		b.WriteString(borderStyle.Render("│") + line + strings.Repeat(" ", pad) + borderStyle.Render("│") + "\n")
 	}
-	// Bottom border
-	b.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	// Bottom border with optional footer label
+	if footer != "" {
+		footerRendered := helpStyle.Render(footer)
+		footerVisWidth := lipgloss.Width(footerRendered)
+		footerFill := innerWidth - footerVisWidth - 3
+		if footerFill < 0 {
+			footerFill = 0
+		}
+		b.WriteString(borderStyle.Render("╰"+strings.Repeat("─", footerFill)+" ") + footerRendered + " " + borderStyle.Render("╯"))
+	} else {
+		b.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	}
 
 	return b.String()
 }
 
-func joinPanes(left, right string, leftTitle, rightTitle string, leftWidth, rightWidth, maxLines int, focusRight bool) string {
+func joinPanes(left, right string, leftTitle, rightTitle, rightFooter string, leftWidth, rightWidth, maxLines int, focusRight bool) string {
 	leftColor := colorMuted
 	rightColor := colorMuted
 	if focusRight {
@@ -550,8 +574,8 @@ func joinPanes(left, right string, leftTitle, rightTitle string, leftWidth, righ
 		leftColor = colorPrimary
 	}
 
-	leftBox := borderedPane(left, leftTitle, leftWidth, maxLines, leftColor)
-	rightBox := borderedPane(right, rightTitle, rightWidth, maxLines, rightColor)
+	leftBox := borderedPane(left, leftTitle, "", leftWidth, maxLines, leftColor)
+	rightBox := borderedPane(right, rightTitle, rightFooter, rightWidth, maxLines, rightColor)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 }
