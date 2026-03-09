@@ -131,8 +131,9 @@ type Model struct {
 	newStreamPhaseCur    int             // cursor into flattened phase list
 	newStreamChecked     map[string]bool // which phases are checked
 	newStreamBreakpoints map[int]bool    // which pipeline gaps have breakpoints
-	newStreamBPCursor    int             // cursor into breakpoint gaps
-	creating             bool            // true while orch.Create is running
+	newStreamBPCursor    int                   // cursor into breakpoint gaps
+	newStreamNotify      stream.NotifySettings // notification toggles
+	creating             bool                  // true while orch.Create is running
 
 	// Delete confirmation overlay state.
 	showDeleteConfirm bool
@@ -142,8 +143,9 @@ type Model struct {
 	showBeadsInit      bool
 	pendingTitle       string   // title stashed while waiting for stealth answer
 	pendingTask        string   // task stashed while waiting for stealth answer
-	pendingPipeline    []string // pipeline stashed while waiting for stealth answer
-	pendingBreakpoints []int    // breakpoints stashed while waiting for stealth answer
+	pendingPipeline    []string               // pipeline stashed while waiting for stealth answer
+	pendingBreakpoints []int                  // breakpoints stashed while waiting for stealth answer
+	pendingNotify      stream.NotifySettings  // notify settings stashed while waiting for stealth answer
 
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
@@ -372,9 +374,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		task := m.pendingTask
 		pipeline := m.pendingPipeline
 		breakpoints := m.pendingBreakpoints
+		notify := m.pendingNotify
 		orch := m.orch
 		return m, func() tea.Msg {
-			st, err := orch.Create(title, task, pipeline, breakpoints)
+			st, err := orch.Create(title, task, pipeline, breakpoints, notify)
 			return streamCreatedMsg{stream: st, err: err}
 		}
 
@@ -509,6 +512,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.newStreamInput.SetWidth(m.inputWidth())
 		m.newStreamChecked = defaultPhaseChecks(m.orch.DefaultPipeline())
 		m.newStreamPhaseCur = 0
+		m.newStreamNotify = stream.NotifySettings{}
 		return m, textarea.Blink
 
 	case "s":
@@ -853,6 +857,16 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "1":
+			m.newStreamNotify.Bell = !m.newStreamNotify.Bell
+			return m, nil
+		case "2":
+			m.newStreamNotify.Flash = !m.newStreamNotify.Flash
+			return m, nil
+		case "3":
+			m.newStreamNotify.System = !m.newStreamNotify.System
+			return m, nil
+
 		case "enter":
 			pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
 			if len(pipeline) == 0 {
@@ -898,6 +912,16 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.newStreamBreakpoints[m.newStreamBPCursor] = !m.newStreamBreakpoints[m.newStreamBPCursor]
 			return m, nil
 
+		case "1":
+			m.newStreamNotify.Bell = !m.newStreamNotify.Bell
+			return m, nil
+		case "2":
+			m.newStreamNotify.Flash = !m.newStreamNotify.Flash
+			return m, nil
+		case "3":
+			m.newStreamNotify.System = !m.newStreamNotify.System
+			return m, nil
+
 		case "enter":
 			var breakpoints []int
 			for i := 0; i < gapCount; i++ {
@@ -915,6 +939,7 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, tea.Cmd) {
 	title := m.newStreamTitle.Value()
 	task := m.newStreamInput.Value()
+	notify := m.newStreamNotify
 	m.showNewStream = false
 	m.newStreamStep = 0
 	if m.orch.NeedsBeadsInit() {
@@ -922,13 +947,14 @@ func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, te
 		m.pendingTask = task
 		m.pendingPipeline = pipeline
 		m.pendingBreakpoints = breakpoints
+		m.pendingNotify = notify
 		m.showBeadsInit = true
 		return m, nil
 	}
 	m.creating = true
 	orch := m.orch
 	return m, func() tea.Msg {
-		st, err := orch.Create(title, task, pipeline, breakpoints)
+		st, err := orch.Create(title, task, pipeline, breakpoints, notify)
 		return streamCreatedMsg{stream: st, err: err}
 	}
 }
@@ -955,6 +981,7 @@ func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showBeadsInit = false
 			m.pendingTitle = ""
 			m.pendingTask = ""
+			m.pendingNotify = stream.NotifySettings{}
 			return m, nil
 		}
 	}
@@ -1188,7 +1215,7 @@ func (m Model) View() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamBreakpoints, m.newStreamBPCursor, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -1288,7 +1315,7 @@ func (m Model) View() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, breakpoints map[int]bool, bpCursor int, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
 	var overlay string
 
 	stepLabel := helpStyle.Render(fmt.Sprintf("  Step %d of 4", step+1))
@@ -1329,7 +1356,8 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 				overlay += cursor + label + "\n"
 			}
 		}
-		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
+		overlay += "\n" + renderNotifyToggles(notify) + "\n"
+		overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
 	default:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
@@ -1352,12 +1380,23 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 			}
 			overlay += cursor + indent + check + label + "\n"
 		}
-		overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: next  esc: back")
+		overlay += "\n" + renderNotifyToggles(notify) + "\n"
+		overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: next  esc: back")
 	}
 
 	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderNotifyToggles(notify stream.NotifySettings) string {
+	dot := func(on bool) string {
+		if on {
+			return "●"
+		}
+		return "○"
+	}
+	return helpStyle.Render(fmt.Sprintf("  Notify: 1 %s bell  2 %s flash  3 %s system", dot(notify.Bell), dot(notify.Flash), dot(notify.System)))
 }
 
 func renderBeadsInitOverlay(width, height int) string {
