@@ -22,6 +22,9 @@ import (
 	"github.com/zmorgan/streams/internal/ui"
 )
 
+// Version is set via ldflags at build time.
+var Version = "dev"
+
 func main() {
 	os.Exit(run())
 }
@@ -29,6 +32,9 @@ func main() {
 func run() int {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--version", "-v":
+			fmt.Println("streams " + Version)
+			return 0
 		case "prompts":
 			return runPrompts(os.Args[2:])
 		case "config":
