@@ -78,6 +78,13 @@ func (s Status) String() string {
 	return fmt.Sprintf("Status(%d)", int(s))
 }
 
+// NotifySettings controls which notifications fire on converge/error events.
+type NotifySettings struct {
+	Bell   bool // terminal bell (\a to /dev/tty)
+	Flash  bool // reverse-video flash escape sequence
+	System bool // macOS system notification via osascript
+}
+
 const maxOutputLines = 200
 
 // Stream is the central state model for a running autonomous code generation loop.
@@ -103,8 +110,9 @@ type Stream struct {
 	LastError     *LoopError
 	Snapshots     []Snapshot
 	Guidance      []Guidance
-	ConvergeASAP  bool     // one-shot flag: skip next review to force convergence
-	OutputLines   []string // ring buffer of recent CLI output for tail view
+	ConvergeASAP  bool           // one-shot flag: skip next review to force convergence
+	Notify        NotifySettings // notification preferences for converge/error events
+	OutputLines   []string       // ring buffer of recent CLI output for tail view
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -296,6 +304,20 @@ func (s *Stream) DrainConvergeASAP() bool {
 	s.ConvergeASAP = false
 	s.mu.Unlock()
 	return v
+}
+
+func (s *Stream) SetNotify(n NotifySettings) {
+	s.mu.Lock()
+	s.Notify = n
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetNotify() NotifySettings {
+	s.mu.RLock()
+	n := s.Notify
+	s.mu.RUnlock()
+	return n
 }
 
 // AppendOutput adds a line to the output ring buffer, dropping the oldest
