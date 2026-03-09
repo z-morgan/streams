@@ -363,52 +363,75 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 	snap := snaps[cursor]
 
 	var b strings.Builder
+	hr := helpStyle.Render(strings.Repeat("─", width))
 
-	b.WriteString(labelStyle.Render("Iteration Snapshot"))
-	b.WriteString("\n\n")
+	// Header with right-aligned cost
+	headerRendered := labelStyle.Render("Iteration Snapshot")
+	if snap.CostUSD > 0 {
+		costStr := helpStyle.Render(fmt.Sprintf("$%.2f", snap.CostUSD))
+		pad := width - lipgloss.Width(headerRendered) - lipgloss.Width(costStr)
+		if pad < 1 {
+			pad = 1
+		}
+		b.WriteString(headerRendered + strings.Repeat(" ", pad) + costStr)
+	} else {
+		b.WriteString(headerRendered)
+	}
+	b.WriteString("\n" + hr + "\n")
 
 	b.WriteString(labelStyle.Render("Implementation Agent's Report"))
 	b.WriteString("\n")
 	b.WriteString(wrapText(snap.Summary, width))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	reviewText := snap.Review
 	if reviewText == "" {
 		reviewText = reviewFallback(snap)
 	}
 	if reviewText != "" {
+		b.WriteString("\n" + hr + "\n")
 		b.WriteString(labelStyle.Render("Review Agent's Report"))
 		b.WriteString("\n")
 		b.WriteString(wrapText(reviewText, width))
-		b.WriteString("\n\n")
+		b.WriteString("\n")
 	}
+
+	if len(snap.BeadsClosed) > 0 || len(snap.BeadsOpened) > 0 {
+		b.WriteString("\n" + hr + "\n")
+	}
+
+	successIcon := lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
+	openedIcon := lipgloss.NewStyle().Foreground(colorWarning).Render("+")
 
 	if len(snap.BeadsClosed) > 0 {
 		b.WriteString(labelStyle.Render(fmt.Sprintf("Closed (%d)", len(snap.BeadsClosed))))
 		b.WriteString("\n")
-		b.WriteString("  " + strings.Join(snap.BeadsClosed, "  "))
-		b.WriteString("\n\n")
+		for _, id := range snap.BeadsClosed {
+			b.WriteString("  " + successIcon + " " + id + "\n")
+		}
 	}
 
 	if len(snap.BeadsOpened) > 0 {
+		if len(snap.BeadsClosed) > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(labelStyle.Render(fmt.Sprintf("Opened (%d)", len(snap.BeadsOpened))))
 		b.WriteString("\n")
-		b.WriteString("  " + strings.Join(snap.BeadsOpened, "  "))
-		b.WriteString("\n\n")
+		for _, id := range snap.BeadsOpened {
+			b.WriteString("  " + openedIcon + " " + id + "\n")
+		}
 	}
 
 	if snap.DiffStat != "" {
+		b.WriteString("\n" + hr + "\n")
 		b.WriteString(labelStyle.Render("Diff"))
 		b.WriteString("\n")
-		b.WriteString(snap.DiffStat)
-		b.WriteString("\n\n")
-	}
-
-	if snap.CostUSD > 0 {
-		b.WriteString(fmt.Sprintf("Cost: $%.2f\n", snap.CostUSD))
+		b.WriteString(colorizeDiffStat(snap.DiffStat))
+		b.WriteString("\n")
 	}
 
 	if len(snap.GuidanceConsumed) > 0 {
+		b.WriteString("\n" + hr + "\n")
 		b.WriteString(labelStyle.Render("Guidance Applied"))
 		b.WriteString("\n")
 		for _, g := range snap.GuidanceConsumed {
@@ -422,6 +445,33 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 	}
 
 	return b.String()
+}
+
+// colorizeDiffStat renders +/- characters in diff stat lines with green/red.
+func colorizeDiffStat(stat string) string {
+	greenStyle := lipgloss.NewStyle().Foreground(colorSuccess)
+	redStyle := lipgloss.NewStyle().Foreground(colorError)
+	lines := strings.Split(stat, "\n")
+	for i, line := range lines {
+		if idx := strings.LastIndex(line, "|"); idx >= 0 {
+			prefix := line[:idx+1]
+			rest := line[idx+1:]
+			var colored strings.Builder
+			colored.WriteString(prefix)
+			for _, ch := range rest {
+				switch ch {
+				case '+':
+					colored.WriteString(greenStyle.Render("+"))
+				case '-':
+					colored.WriteString(redStyle.Render("-"))
+				default:
+					colored.WriteRune(ch)
+				}
+			}
+			lines[i] = colored.String()
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderArtifactDetail(snaps []stream.Snapshot, cursor int, width int) string {
