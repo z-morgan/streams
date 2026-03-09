@@ -4,12 +4,14 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Colors
-	colorPrimary   = lipgloss.Color("12")  // bright blue
+	colorPrimary   = lipgloss.Color("33")  // blue
 	colorSecondary = lipgloss.Color("243") // gray
-	colorSuccess   = lipgloss.Color("10")  // green
-	colorError     = lipgloss.Color("9")   // red
-	colorWarning   = lipgloss.Color("11")  // yellow
+	colorSuccess   = lipgloss.Color("34")  // green
+	colorError     = lipgloss.Color("160") // red
+	colorWarning   = lipgloss.Color("214") // amber
 	colorMuted     = lipgloss.Color("240") // dark gray
+	colorSubtle    = lipgloss.Color("236") // near-background gray
+	colorHighlight = lipgloss.Color("39")  // cyan accent
 
 	// Status colors
 	statusColors = map[string]lipgloss.Color{
@@ -28,9 +30,13 @@ var (
 
 	selectedRowStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(colorPrimary)
+				Foreground(colorPrimary).
+				Background(colorSubtle)
 
 	normalRowStyle = lipgloss.NewStyle()
+
+	metadataStyle = lipgloss.NewStyle().
+			Faint(true)
 
 	cursorStyle = lipgloss.NewStyle().
 			Foreground(colorPrimary).
