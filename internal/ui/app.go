@@ -1174,7 +1174,7 @@ func (m Model) View() string {
 		case modeChannels:
 			body = renderChannels(streams, m.dashboard.cursor, m.dashboard.scrollLeft, m.width, m.height, frame)
 		default:
-			body = renderDashboardList(streams, m.dashboard.cursor, frame)
+			body = renderDashboardList(streams, m.dashboard.cursor, m.width, m.height, frame)
 		}
 
 		var statusLine string

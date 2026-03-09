@@ -47,14 +47,12 @@ func (d *dashboardView) clampScroll(streamCount, visibleCols int) {
 	}
 }
 
-func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame string) string {
-	var b strings.Builder
-
+func renderDashboardList(streams []*stream.Stream, cursor int, width, height int, spinnerFrame string) string {
 	if len(streams) == 0 {
-		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
-		b.WriteString("\n")
-		return b.String()
+		return renderEmptyState(width, height-4)
 	}
+
+	var b strings.Builder
 
 	// Column widths
 	const statusCol = 14
@@ -277,9 +275,7 @@ func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height 
 	var b strings.Builder
 
 	if len(streams) == 0 {
-		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
-		b.WriteString("\n")
-		return b.String()
+		return renderEmptyState(width, height-4)
 	}
 
 	colWidth, visibleCols := channelLayout(len(streams), width)
@@ -444,4 +440,11 @@ func detailTopBar(st *stream.Stream, width int) string {
 		nameMax = 10
 	}
 	return "Streams › " + truncate(st.Name, nameMax) + "  " + helpStyle.Render(suffix)
+}
+
+func renderEmptyState(width, height int) string {
+	msg := helpStyle.Render("No streams yet. Press ") +
+		helpKeyStyle.Render("n") +
+		helpStyle.Render(" to create one.")
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, msg)
 }
