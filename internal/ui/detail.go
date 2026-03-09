@@ -108,16 +108,9 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 
 	var b strings.Builder
 
-	// Header
-	header := fmt.Sprintf("%s  %s  iter %d",
-		st.Name, currentPhase(st), st.GetIteration())
-	b.WriteString(headerStyle.Render(header))
-	b.WriteString("\n")
-
 	// Available height for the two-pane area:
-	// header (text + border + margin) = 3 lines, plus explicit \n = 4 lines
-	// footer (\n + help line) = 2 lines
-	paneHeight := height - 6
+	// top bar = 1 line, bottom bar = 2 lines, gap = 1 line
+	paneHeight := height - 4
 	if paneHeight < 5 {
 		paneHeight = 5
 	}
@@ -167,10 +160,6 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 		b.WriteString(joinPanes(left, right, leftWidth, paneHeight))
 	}
 
-	b.WriteString("\n")
-	help := detailHelpText(st, dv, rows, snaps)
-	b.WriteString(helpStyle.Render(help))
-
 	return b.String()
 }
 
@@ -195,18 +184,18 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 	status := st.GetStatus()
 
 	if status == stream.StatusCompleted {
-		return "d: delete  q/esc: back"
+		return "D: diagnose  d: delete  q/esc: back"
 	}
 
 	if isPausedAtReview(st) {
-		return "j/k: iterations  c: complete  r: revise  g: guidance  d: delete  q/esc: back"
+		return "j/k: iterations  c: complete  r: revise  D: diagnose  g: guidance  d: delete  q/esc: back"
 	}
 
 	var help string
 	if status == stream.StatusRunning {
 		help = "j/k: iterations  enter: focus output  a: attach  w: wrap up  x: stop  g: guidance  q/esc: back"
 	} else {
-		help = "j/k: iterations  enter: focus output  a: attach  s: start  x: stop  g: guidance  q/esc: back"
+		help = "j/k: iterations  enter: focus output  a: attach  s: start  D: diagnose  x: stop  g: guidance  q/esc: back"
 	}
 
 	// Show artifact toggle hint when the selected snapshot has an artifact.

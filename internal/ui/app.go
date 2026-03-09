@@ -210,6 +210,11 @@ type streamRevisedMsg struct {
 	err error
 }
 
+// diagnoseExitMsg is sent when a diagnosis claude session exits.
+type diagnoseExitMsg struct {
+	err error
+}
+
 // New creates a new TUI model.
 func New(orch *orchestrator.Orchestrator) Model {
 	ti := textarea.New()
@@ -405,6 +410,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case diagnoseExitMsg:
+		if msg.err != nil {
+			m.errorMsg = "Diagnosis session exited with error: " + msg.err.Error()
+		}
+		return m, nil
+
 	case streamDeletedMsg:
 		if msg.err != nil {
 			m.errorMsg = "Error deleting stream: " + msg.err.Error()
@@ -509,6 +520,13 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			return m.setStatus("No stream selected.")
 		}
+
+	case "D":
+		if st := m.selectedStream(); st != nil {
+			m.selectedID = st.ID
+			return m.startDiagnose(st.ID)
+		}
+		return m.setStatus("No stream selected.")
 
 	case "v":
 		if m.dashboard.mode == modeChannels {
@@ -669,6 +687,12 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return claudeExitMsg{err: err}
 		})
+
+	case "D":
+		if st == nil {
+			return m, nil
+		}
+		return m.startDiagnose(st.ID)
 	}
 
 	return m, nil
@@ -1152,21 +1176,24 @@ func (m Model) View() string {
 		default:
 			body = renderDashboardList(streams, m.dashboard.cursor, frame)
 		}
+
+		var statusLine string
 		if m.creating {
-			body += "\n" + helpStyle.Render("Creating stream...")
+			statusLine = "Creating stream..."
 		}
 		if m.errorMsg != "" {
-			body += "\n" + errorBlockStyle.Render(m.errorMsg)
+			statusLine = errorBlockStyle.Render(m.errorMsg)
 		}
 		if m.statusMsg != "" {
-			body += "\n" + helpStyle.Render(m.statusMsg)
+			statusLine = m.statusMsg
 		}
+
 		help := dashboardChannelHelp
 		if m.dashboard.mode == modeList {
 			help = dashboardListHelp
 		}
-		footer := helpStyle.Render(help)
-		return layoutWithFooter(body, footer, m.height)
+		topBar := dashboardTopBar(streams)
+		return layoutWithBars(topBar, body, statusLine, help, m.width, m.height)
 
 	case viewDetail:
 		st := m.orch.Get(m.selectedID)
@@ -1176,13 +1203,20 @@ func (m Model) View() string {
 		}
 		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 		content := renderDetail(st, m.detail, layoutWidth, m.height, frame)
+
+		var statusLine string
 		if m.errorMsg != "" {
-			content += "\n" + errorBlockStyle.Render(m.errorMsg)
+			statusLine = errorBlockStyle.Render(m.errorMsg)
 		}
 		if m.statusMsg != "" {
-			content += "\n" + helpStyle.Render(m.statusMsg)
+			statusLine = m.statusMsg
 		}
-		return clipLines(content, m.width)
+
+		rows := buildIterationList(st)
+		snaps := st.GetSnapshots()
+		help := detailHelpText(st, m.detail, rows, snaps)
+		topBar := detailTopBar(st)
+		return layoutWithBars(topBar, clipLines(content, m.width), statusLine, help, m.width, m.height)
 
 	default:
 		return ""
@@ -1477,4 +1511,35 @@ func (m Model) selectedStream() *stream.Stream {
 		return streams[m.dashboard.cursor]
 	}
 	return nil
+}
+
+// canDiagnose returns true when the stream is in a state suitable for diagnosis
+// (paused, stopped, errored, or completed — but not running or just created).
+func canDiagnose(st *stream.Stream) bool {
+	switch st.GetStatus() {
+	case stream.StatusPaused, stream.StatusStopped, stream.StatusCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+// startDiagnose launches an interactive diagnosis claude session for the given
+// stream. Returns a command that takes over the terminal via tea.ExecProcess.
+func (m Model) startDiagnose(id string) (tea.Model, tea.Cmd) {
+	st := m.orch.Get(id)
+	if st == nil {
+		return m.setStatus("Stream not found.")
+	}
+	if !canDiagnose(st) {
+		return m.setStatus("Stop the stream before diagnosing.")
+	}
+	cmd, err := m.orch.Diagnose(id)
+	if err != nil {
+		m.errorMsg = "Diagnose error: " + err.Error()
+		return m, nil
+	}
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return diagnoseExitMsg{err: err}
+	})
 }

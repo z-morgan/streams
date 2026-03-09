@@ -50,9 +50,6 @@ func (d *dashboardView) clampScroll(streamCount, visibleCols int) {
 func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame string) string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Streams"))
-	b.WriteString("\n\n")
-
 	if len(streams) == 0 {
 		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
 		b.WriteString("\n")
@@ -102,8 +99,8 @@ func renderDashboardList(streams []*stream.Stream, cursor int, spinnerFrame stri
 	return b.String()
 }
 
-const dashboardListHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  v: channels  q: quit"
-const dashboardChannelHelp = "h/l: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  g: guidance  v: list  q: quit"
+const dashboardListHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  D: diagnose  g: guidance  v: channels  q: quit"
+const dashboardChannelHelp = "h/l: navigate  enter: inspect  n: new  s: start  x: stop  d: delete  D: diagnose  g: guidance  v: list  q: quit"
 
 // channelLayout computes column width and visible column count for the
 // terminal width. Columns are between 25 and 40 characters wide.
@@ -218,9 +215,6 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int, spinnerFrame string) string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Streams"))
-	b.WriteString("\n\n")
-
 	if len(streams) == 0 {
 		b.WriteString(helpStyle.Render("No streams yet. Press n to create one."))
 		b.WriteString("\n")
@@ -316,20 +310,71 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-// layoutWithFooter places body at the top and footer at the bottom of the
-// terminal, filling the gap between them with blank lines. This ensures the
-// footer (help text) is always visible regardless of body length.
-func layoutWithFooter(body, footer string, height int) string {
+// layoutWithBars renders the full screen layout: top bar, body, bottom bar.
+// The top bar shows the title and context info. The bottom bar has two rows:
+// a status line and the help key legend.
+func layoutWithBars(topBar, body, statusLine, helpLine string, width, height int) string {
+	top := topBarStyle.Width(width).Render(topBar)
+
+	var bottomParts []string
+	if statusLine != "" {
+		bottomParts = append(bottomParts, bottomBarStyle.Width(width).Render(statusLine))
+	}
+	bottomParts = append(bottomParts, bottomBarStyle.Width(width).Render(helpLine))
+	bottom := strings.Join(bottomParts, "\n")
+
 	if height <= 0 {
-		return body + "\n" + footer
+		return top + "\n" + body + "\n" + bottom
 	}
 
+	topLines := strings.Count(top, "\n") + 1
 	bodyLines := strings.Count(body, "\n") + 1
-	footerLines := strings.Count(footer, "\n") + 1
-	gap := height - bodyLines - footerLines
+	bottomLines := strings.Count(bottom, "\n") + 1
+	gap := height - topLines - bodyLines - bottomLines
 	if gap < 1 {
 		gap = 1
 	}
 
-	return body + strings.Repeat("\n", gap) + footer
+	return top + "\n" + body + strings.Repeat("\n", gap) + bottom
+}
+
+// dashboardTopBar returns the top bar content for the dashboard view.
+func dashboardTopBar(streams []*stream.Stream) string {
+	if len(streams) == 0 {
+		return "Streams"
+	}
+
+	counts := make(map[string]int)
+	for _, st := range streams {
+		counts[st.GetStatus().String()]++
+	}
+
+	var parts []string
+	if n := counts["Running"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d running", n))
+	}
+	if n := counts["Paused"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d paused", n))
+	}
+	if n := counts["Completed"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d completed", n))
+	}
+	if n := counts["Stopped"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d stopped", n))
+	}
+
+	if len(parts) == 0 {
+		return fmt.Sprintf("Streams (%d)", len(streams))
+	}
+	return "Streams  " + helpStyle.Render(strings.Join(parts, " · "))
+}
+
+// detailTopBar returns the top bar content for the detail view.
+func detailTopBar(st *stream.Stream) string {
+	if st == nil {
+		return "Streams › ?"
+	}
+	phase := currentPhase(st)
+	iter := fmt.Sprintf("iter %d", st.GetIteration())
+	return "Streams › " + st.Name + "  " + helpStyle.Render(phase+" · "+iter)
 }
