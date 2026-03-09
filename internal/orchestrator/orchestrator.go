@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zmorgan/streams/internal/diagnosis"
 	"github.com/zmorgan/streams/internal/loop"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/runtime/claude"
@@ -461,6 +462,23 @@ func (o *Orchestrator) Converge(id string) error {
 	}
 	st.SetConvergeASAP(true)
 	return nil
+}
+
+// Diagnose returns an exec.Cmd for an interactive claude CLI session pre-loaded
+// with the stream's diagnosis context. The caller executes the command
+// (e.g., via tea.ExecProcess). Only valid for non-running streams.
+func (o *Orchestrator) Diagnose(id string) (*exec.Cmd, error) {
+	o.mu.RLock()
+	st := o.streams[id]
+	_, running := o.cancels[id]
+	o.mu.RUnlock()
+	if st == nil {
+		return nil, fmt.Errorf("stream %q not found", id)
+	}
+	if running {
+		return nil, fmt.Errorf("stream %q is running — stop it first", id)
+	}
+	return diagnosis.SpawnCmd(st, o.store.Root, o.config.RepoDir), nil
 }
 
 // SendGuidance queues a guidance message for a stream.
