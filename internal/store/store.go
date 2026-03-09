@@ -36,6 +36,7 @@ type streamData struct {
 	Branch        string    `json:"branch"`
 	WorkTree      string    `json:"worktree"`
 	SessionID     string          `json:"session_id,omitempty"`
+	Notify        *notifyData     `json:"notify,omitempty"`
 	LastError     *errData        `json:"last_error,omitempty"`
 	Guidance      []guidanceData `json:"guidance,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
@@ -45,6 +46,12 @@ type streamData struct {
 type guidanceData struct {
 	Text      string    `json:"text"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type notifyData struct {
+	Bell   bool `json:"bell,omitempty"`
+	Flash  bool `json:"flash,omitempty"`
+	System bool `json:"system,omitempty"`
 }
 
 type errData struct {
@@ -200,6 +207,10 @@ func toStreamData(st *stream.Stream) streamData {
 		CreatedAt:     st.CreatedAt,
 		UpdatedAt:     st.UpdatedAt,
 	}
+	n := st.GetNotify()
+	if n.Bell || n.Flash || n.System {
+		d.Notify = &notifyData{Bell: n.Bell, Flash: n.Flash, System: n.System}
+	}
 	if st.LastError != nil {
 		d.LastError = &errData{
 			Kind:    st.LastError.Kind.String(),
@@ -252,6 +263,13 @@ func fromStreamData(d streamData) *stream.Stream {
 		st.Guidance = make([]stream.Guidance, len(d.Guidance))
 		for i, g := range d.Guidance {
 			st.Guidance[i] = stream.Guidance{Text: g.Text, Timestamp: g.Timestamp}
+		}
+	}
+	if d.Notify != nil {
+		st.Notify = stream.NotifySettings{
+			Bell:   d.Notify.Bell,
+			Flash:  d.Notify.Flash,
+			System: d.Notify.System,
 		}
 	}
 	return st
