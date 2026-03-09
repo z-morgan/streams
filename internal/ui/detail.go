@@ -280,8 +280,6 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 				b.WriteString(snapshotNormalStyle.Render("  " + label))
 			}
 			b.WriteString("\n")
-			b.WriteString(labelStyle.Render("Iterations"))
-			b.WriteString("\n")
 			continue
 		}
 
@@ -414,7 +412,7 @@ func borderedPane(content, title string, width, height int, borderColor lipgloss
 	// Top border: ╭─ Title ──────╮
 	titleRendered := titleStyle.Render(title)
 	titleVisWidth := lipgloss.Width(titleRendered)
-	fillLen := innerWidth - titleVisWidth - 2 // 2 for "─ " before title
+	fillLen := innerWidth - titleVisWidth - 3 // 3 for "─ " before and " " after title
 	if fillLen < 0 {
 		fillLen = 0
 	}
