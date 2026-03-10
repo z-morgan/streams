@@ -201,19 +201,22 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 		innerWidth = 1
 	}
 
-	// Header: status dot + name + phase
+	// Header: status dot + name, subtitle: status text + phase
 	name := truncate(st.Name, innerWidth-2) // leave room for dot prefix
 	dot := statusDot(st)
 	phase := currentPhase(st)
+	label := statusLabel(st)
 
 	worktree := ""
 	if st.WorkTree != "" {
 		worktree = helpStyle.Render(truncate("worktree: "+st.Branch, innerWidth)) + "\n"
 	}
 
+	subtitle := label + channelHeaderMutedStyle.Render(" · "+phase)
+
 	header := dot + " " + channelHeaderStyle.Render(name) + "\n" +
 		worktree +
-		channelHeaderMutedStyle.Render(phase)
+		subtitle
 
 	// Iteration rows from snapshots — number sequentially per phase
 	snapshots := st.GetSnapshots()
@@ -342,6 +345,30 @@ func statusDot(st *stream.Stream) string {
 		color = colorError
 	}
 	return lipgloss.NewStyle().Foreground(color).Render("●")
+}
+
+// statusLabel returns a short colored status text for the channel subtitle.
+func statusLabel(st *stream.Stream) string {
+	status := st.GetStatus()
+	name := status.String()
+	color, ok := statusColors[name]
+	if !ok {
+		color = colorMuted
+	}
+	style := lipgloss.NewStyle().Foreground(color)
+
+	switch {
+	case status == stream.StatusCompleted:
+		return lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("completed")
+	case status == stream.StatusPaused && st.GetLastError() != nil:
+		return lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("error")
+	case isPausedAtBreakpoint(st):
+		return lipgloss.NewStyle().Foreground(colorWarning).Render("breakpoint")
+	case isPausedAtReview(st):
+		return lipgloss.NewStyle().Foreground(colorWarning).Render("review")
+	default:
+		return style.Render(strings.ToLower(name))
+	}
 }
 
 func statusIndicator(st *stream.Stream) string {
