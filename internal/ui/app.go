@@ -127,10 +127,10 @@ type Model struct {
 	showNewStream        bool
 	newStreamTitle       textarea.Model
 	newStreamInput       textarea.Model
-	newStreamStep        int             // 0 = title input, 1 = task input, 2 = phase picker, 3 = breakpoint picker
-	newStreamPhaseCur    int             // cursor into flattened phase list
-	newStreamChecked     map[string]bool // which phases are checked
-	newStreamBreakpoints map[int]bool    // which pipeline gaps have breakpoints
+	newStreamStep        int                   // 0 = title input, 1 = task input, 2 = phase picker, 3 = breakpoint picker
+	newStreamPhaseCur    int                   // cursor into flattened phase list
+	newStreamChecked     map[string]bool       // which phases are checked
+	newStreamBreakpoints map[int]bool          // which pipeline gaps have breakpoints
 	newStreamBPCursor    int                   // cursor into breakpoint gaps
 	newStreamNotify      stream.NotifySettings // notification toggles
 	creating             bool                  // true while orch.Create is running
@@ -141,11 +141,11 @@ type Model struct {
 
 	// Beads init prompt state.
 	showBeadsInit      bool
-	pendingTitle       string   // title stashed while waiting for stealth answer
-	pendingTask        string   // task stashed while waiting for stealth answer
-	pendingPipeline    []string               // pipeline stashed while waiting for stealth answer
-	pendingBreakpoints []int                  // breakpoints stashed while waiting for stealth answer
-	pendingNotify      stream.NotifySettings  // notify settings stashed while waiting for stealth answer
+	pendingTitle       string                // title stashed while waiting for stealth answer
+	pendingTask        string                // task stashed while waiting for stealth answer
+	pendingPipeline    []string              // pipeline stashed while waiting for stealth answer
+	pendingBreakpoints []int                 // breakpoints stashed while waiting for stealth answer
+	pendingNotify      stream.NotifySettings // notify settings stashed while waiting for stealth answer
 
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
@@ -787,7 +787,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showNewStream = false
 			return m, nil
 
-		case "ctrl+n":
+		case "enter":
 			if m.newStreamStep == 0 {
 				title := m.newStreamTitle.Value()
 				if title == "" {
@@ -802,6 +802,13 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.newStreamStep = 2
+			return m, nil
+
+		case "alt+enter":
+			if m.newStreamStep == 1 {
+				m.newStreamInput.InsertString("\n")
+				return m, nil
+			}
 			return m, nil
 		}
 	}
@@ -855,16 +862,6 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.newStreamChecked[child] = true
 				}
 			}
-			return m, nil
-
-		case "1":
-			m.newStreamNotify.Bell = !m.newStreamNotify.Bell
-			return m, nil
-		case "2":
-			m.newStreamNotify.Flash = !m.newStreamNotify.Flash
-			return m, nil
-		case "3":
-			m.newStreamNotify.System = !m.newStreamNotify.System
 			return m, nil
 
 		case "enter":
@@ -1325,19 +1322,20 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += "Title:\n"
 		overlay += titleInput.View() + "\n\n"
-		overlay += helpStyle.Render("ctrl+n: next  esc: cancel")
+		overlay += helpStyle.Render("enter: next  esc: cancel")
 	case 1:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n\n"
 		overlay += "Task:\n"
 		overlay += taskInput.View() + "\n\n"
-		overlay += helpStyle.Render("ctrl+n: next  esc: back")
+		overlay += helpStyle.Render("enter: next  alt+enter: new line  esc: back")
 	case 3:
 		pipeline := selectedPipeline(checked, phaseTree)
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
-		overlay += "Set breakpoints (pause between phases):\n\n"
+		overlay += "Set breakpoints (pause between phases):\n"
+		overlay += helpStyle.Render("  You'll be notified when the stream pauses at each breakpoint.") + "\n\n"
 		for i, name := range pipeline {
 			overlay += "  " + name + "\n"
 			if i < len(pipeline)-1 {
@@ -1380,8 +1378,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 			}
 			overlay += cursor + indent + check + label + "\n"
 		}
-		overlay += "\n" + renderNotifyToggles(notify) + "\n"
-		overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: next  esc: back")
+		overlay += helpStyle.Render("\nj/k: navigate  space: toggle  enter: next  esc: back")
 	}
 
 	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
