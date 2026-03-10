@@ -37,7 +37,7 @@ Iteration 3: Final fix → Review → 0 beads → converged ✓
 ### Install
 
 ```bash
-brew install zmorgan/tap/streams
+brew install z-morgan/tap/streams
 ```
 
 Or with Go:
