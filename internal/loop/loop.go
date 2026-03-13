@@ -135,7 +135,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			implPrompt = appendGuidanceSection(implPrompt, pendingGuidance)
 		}
 
-		implReq := buildRequest(implPrompt, phase.ImplementTools())
+		implReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort())
 		implReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		implResp, err := rt.Run(ctx, implReq)
 		if err != nil {
@@ -209,7 +209,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
 				reviewResp = &runtime.Response{}
 			} else {
-				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools())
+				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort())
 				reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
 				reviewResp, err = rt.Run(ctx, reviewReq)
 				if err != nil {
@@ -362,12 +362,22 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	}
 }
 
-func buildRequest(prompt string, tools []string) runtime.Request {
+func buildRequest(prompt string, tools []string, envPort int) runtime.Request {
+	systemPrompt := orchestratorRules
+	if envPort > 0 {
+		systemPrompt += fmt.Sprintf(`
+
+## Application Server
+
+A live application server is running at http://localhost:%d.
+Use the chrome-devtools MCP tool to open pages, inspect elements, and verify your UI changes in the browser.
+After making code changes, the server will automatically reload — just refresh the page.`, envPort)
+	}
 	return runtime.Request{
 		Prompt: prompt,
 		Options: map[string]string{
 			"allowedTools":       strings.Join(tools, ","),
-			"appendSystemPrompt": orchestratorRules,
+			"appendSystemPrompt": systemPrompt,
 			"permissionMode":     "dontAsk",
 		},
 	}
@@ -466,7 +476,7 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 			continue
 		}
 
-		req := buildRequest(prompt, slot.Tools)
+		req := buildRequest(prompt, slot.Tools, s.GetEnvironmentPort())
 		req.OnOutput = func(line string) { s.AppendOutput(line) }
 		resp, err := rt.Run(ctx, req)
 		if err != nil {

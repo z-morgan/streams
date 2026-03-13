@@ -134,7 +134,7 @@ func (p *CodingPhase) runRebaseAgent(ctx context.Context, pctx PhaseContext, reb
 
 	rt := &runtime.BudgetRuntime{Inner: pctx.Runtime, MaxBudget: "0.50"}
 
-	req := buildRequest(prompt, p.ImplementTools())
+	req := buildRequest(prompt, p.ImplementTools(), pctx.Stream.GetEnvironmentPort())
 	req.OnOutput = func(line string) { pctx.Stream.AppendOutput(line) }
 
 	_, err = rt.Run(ctx, req)
