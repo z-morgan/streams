@@ -459,8 +459,9 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 // Revise rewinds a stream to an earlier pipeline phase with optional feedback.
 // For paused/stopped streams, the revise is applied immediately and the stream
 // restarts. For running streams, the revise is queued and applied between
-// iterations by the loop.
-func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) error {
+// iterations by the loop. If replace is true and the stream is running, the
+// current iteration is interrupted and the revise is applied immediately.
+func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string, replace bool) error {
 	o.mu.Lock()
 	st := o.streams[id]
 	if st == nil {
@@ -475,7 +476,7 @@ func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) 
 		return fmt.Errorf("target phase index %d must be less than current index %d", targetPhaseIndex, currentIdx)
 	}
 
-	if running {
+	if running && !replace {
 		st.SetPendingRevise(&stream.PendingRevise{
 			TargetPhaseIndex: targetPhaseIndex,
 			Feedback:         feedback,
@@ -483,6 +484,18 @@ func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) 
 		return nil
 	}
 
+	if running {
+		if err := o.Interrupt(id); err != nil {
+			return fmt.Errorf("interrupting stream for revise: %w", err)
+		}
+	}
+
+	pipeline := st.GetPipeline()
+	fromPhase := ""
+	if currentIdx < len(pipeline) {
+		fromPhase = pipeline[currentIdx]
+	}
+	st.SetReviseContext(fromPhase, feedback)
 	st.SetPipelineIndex(targetPhaseIndex)
 	st.SetConverged(false)
 	st.SetIteration(0)

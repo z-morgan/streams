@@ -167,7 +167,8 @@ type Model struct {
 	showRevise        bool
 	revisePhaseCursor int
 	reviseFeedback    textarea.Model
-	reviseStep        int // 0 = phase picker, 1 = feedback input
+	reviseStep        int  // 0 = phase picker, 1 = feedback input, 2 = enqueue/replace picker
+	reviseReplace     bool // true = scrap & replace, false = enqueue
 
 	// Attach state.
 	interrupting        bool // true while waiting for Interrupt to finish
@@ -1349,8 +1350,38 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.reviseStep == 2 {
+		// Enqueue/replace picker step (only shown when stream is running).
+		switch msg := msg.(type) {
+		case tea.KeyPressMsg:
+			switch msg.String() {
+			case "esc":
+				m.reviseStep = 1
+				m.reviseFeedback.Focus()
+				return m, textarea.Blink
+
+			case "j", "down", "k", "up", "tab":
+				m.reviseReplace = !m.reviseReplace
+				return m, nil
+
+			case "enter":
+				m.showRevise = false
+				feedback := m.reviseFeedback.Value()
+				targetIdx := m.revisePhaseCursor
+				replace := m.reviseReplace
+				id := m.selectedID
+				orch := m.orch
+				return m, func() tea.Msg {
+					return streamRevisedMsg{err: orch.Revise(id, targetIdx, feedback, replace)}
+				}
+			}
+		}
+		return m, nil
+	}
+
 	if m.reviseStep == 1 {
 		// Feedback input step.
+		isRunning := st.GetStatus() == stream.StatusRunning
 		switch msg := msg.(type) {
 		case tea.KeyPressMsg:
 			switch msg.String() {
@@ -1359,13 +1390,18 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "super+s", "ctrl+s":
+				if isRunning {
+					m.reviseReplace = false
+					m.reviseStep = 2
+					return m, nil
+				}
 				m.showRevise = false
 				feedback := m.reviseFeedback.Value()
 				targetIdx := m.revisePhaseCursor
 				id := m.selectedID
 				orch := m.orch
 				return m, func() tea.Msg {
-					return streamRevisedMsg{err: orch.Revise(id, targetIdx, feedback)}
+					return streamRevisedMsg{err: orch.Revise(id, targetIdx, feedback, false)}
 				}
 			}
 		}
@@ -1480,7 +1516,7 @@ func (m Model) viewString() string {
 				pendingTarget = pipeline[pr.TargetPhaseIndex]
 			}
 		}
-		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, isRunning, pendingTarget, m.reviseFeedback, m.width, m.height)
+		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, isRunning, m.reviseReplace, pendingTarget, m.reviseFeedback, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -1736,7 +1772,7 @@ func renderCompleteOverlay(ti textarea.Model, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, pendingTarget string, feedback textarea.Model, width, height int) string {
+func renderReviseOverlay(phases []string, cursor, step int, isRunning, replaceSelected bool, pendingTarget string, feedback textarea.Model, width, height int) string {
 	overlay := overlayTitleStyle.Render("Revise Stream") + "\n\n"
 
 	if step == -1 {
@@ -1746,12 +1782,39 @@ func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, pend
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 	}
 
-	if step == 1 {
+	if step == 2 {
 		if cursor >= 0 && cursor < len(phases) {
 			overlay += helpStyle.Render("Target phase: "+phases[cursor]) + "\n\n"
 		}
-		if isRunning {
-			overlay += helpStyle.Render("(will apply after current iteration completes)") + "\n\n"
+		overlay += "The stream is currently running.\n\n"
+
+		options := []struct {
+			label string
+			desc  string
+		}{
+			{"Enqueue", "apply after the current iteration completes"},
+			{"Replace", "scrap the current iteration and revise now"},
+		}
+		for i, opt := range options {
+			selected := (i == 1) == replaceSelected
+			prefix := "  "
+			if selected {
+				prefix = cursorStyle.Render("> ")
+			}
+			label := opt.label + " — " + opt.desc
+			if selected {
+				label = selectedRowStyle.Render(label)
+			}
+			overlay += prefix + label + "\n"
+		}
+		overlay += "\n" + helpStyle.Render("j/k: toggle  enter: confirm  esc: back")
+		box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+	}
+
+	if step == 1 {
+		if cursor >= 0 && cursor < len(phases) {
+			overlay += helpStyle.Render("Target phase: "+phases[cursor]) + "\n\n"
 		}
 		overlay += "Feedback (optional):\n"
 		overlay += feedback.View() + "\n\n"
@@ -1769,11 +1832,7 @@ func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, pend
 			}
 			overlay += prefix + label + "\n"
 		}
-		hint := "j/k: navigate  enter: select  esc: cancel"
-		if isRunning {
-			hint += "\n(will apply after current iteration completes)"
-		}
-		overlay += "\n" + helpStyle.Render(hint)
+		overlay += "\n" + helpStyle.Render("j/k: navigate  enter: select  esc: cancel")
 	}
 
 	cap := 80
