@@ -536,21 +536,20 @@ func (o *Orchestrator) Converge(id string) error {
 	return nil
 }
 
-// Diagnose returns an exec.Cmd for an interactive claude CLI session pre-loaded
-// with the stream's diagnosis context. The caller executes the command
-// (e.g., via tea.ExecProcess). Only valid for non-running streams.
-func (o *Orchestrator) Diagnose(id string) (*exec.Cmd, error) {
+// Diagnose launches an interactive claude CLI session in a new terminal tab,
+// pre-loaded with the stream's diagnosis context. Only valid for non-running streams.
+func (o *Orchestrator) Diagnose(id string) error {
 	o.mu.RLock()
 	st := o.streams[id]
 	_, running := o.cancels[id]
 	o.mu.RUnlock()
 	if st == nil {
-		return nil, fmt.Errorf("stream %q not found", id)
+		return fmt.Errorf("stream %q not found", id)
 	}
 	if running {
-		return nil, fmt.Errorf("stream %q is running — stop it first", id)
+		return fmt.Errorf("stream %q is running — stop it first", id)
 	}
-	return diagnosis.SpawnCmd(st, o.store.Root, o.config.RepoDir), nil
+	return diagnosis.LaunchInTab(st, o.store.Root, o.config.RepoDir)
 }
 
 // SendGuidance queues a guidance message for a stream.

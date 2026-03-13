@@ -227,10 +227,6 @@ type forceAdvancedMsg struct {
 	err error
 }
 
-// diagnoseExitMsg is sent when a diagnosis claude session exits.
-type diagnoseExitMsg struct {
-	err error
-}
 
 type beadShowMsg struct {
 	output string
@@ -455,11 +451,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case diagnoseExitMsg:
-		if msg.err != nil {
-			m = m.withError("Diagnosis session exited with error: " + msg.err.Error())
-		}
-		return m, nil
 
 	case beadShowMsg:
 		m.detail.beadShowOutput = msg.output
@@ -1862,8 +1853,8 @@ func canDiagnose(st *stream.Stream) bool {
 	}
 }
 
-// startDiagnose launches an interactive diagnosis claude session for the given
-// stream. Returns a command that takes over the terminal via tea.ExecProcess.
+// startDiagnose launches an interactive diagnosis claude session in a new
+// terminal tab for the given stream.
 func (m Model) startDiagnose(id string) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(id)
 	if st == nil {
@@ -1872,12 +1863,9 @@ func (m Model) startDiagnose(id string) (tea.Model, tea.Cmd) {
 	if !canDiagnose(st) {
 		return m.setStatus("Stop the stream before diagnosing.")
 	}
-	cmd, err := m.orch.Diagnose(id)
-	if err != nil {
+	if err := m.orch.Diagnose(id); err != nil {
 		m = m.withError("Diagnose error: " + err.Error())
 		return m, nil
 	}
-	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return diagnoseExitMsg{err: err}
-	})
+	return m.setStatus("Diagnosis launched in new tab.")
 }
