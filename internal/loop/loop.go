@@ -262,6 +262,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			beadTitles, _ = beads.FetchAllChildTitles(s.BeadsParentID)
 		}
 
+		reviseFrom, reviseFeedback := s.DrainReviseContext()
+
 		snap := stream.Snapshot{
 			Phase:            phase.Name(),
 			Iteration:        iteration,
@@ -274,6 +276,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			BeadsClosed:      beadsClosed,
 			BeadsOpened:      beadsOpened,
 			BeadTitles:       beadTitles,
+			ReviseFrom:       reviseFrom,
+			ReviseFeedback:   reviseFeedback,
 			AutosquashErr:    autosquashErr,
 			GuidanceConsumed: pendingGuidance,
 			Timestamp:        time.Now(),
@@ -331,6 +335,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 		// Check for a queued revise request between iterations.
 		if pr := s.DrainPendingRevise(); pr != nil {
+			fromPhase := phase.Name()
+			s.SetReviseContext(fromPhase, pr.Feedback)
 			s.SetPipelineIndex(pr.TargetPhaseIndex)
 			s.SetConverged(false)
 			s.SetIteration(0)
@@ -348,7 +354,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			phase = newPhase
 			pendingGuidance = s.DrainGuidance()
 			startIteration = 0
-			slog.Info("applying queued revise", "stream", s.ID, "targetPhase", newPhase.Name())
+			slog.Info("applying queued revise", "stream", s.ID, "fromPhase", fromPhase, "targetPhase", newPhase.Name())
 			continue
 		}
 
