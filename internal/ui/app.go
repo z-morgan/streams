@@ -709,7 +709,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "r":
-		if st != nil && isPausedAtReview(st) {
+		if st != nil && st.GetStatus() != stream.StatusCompleted && st.GetPipelineIndex() > 0 {
 			fi := textarea.New()
 			fi.Placeholder = "Optional feedback for the target phase..."
 			fi.Prompt = ""
@@ -1411,14 +1411,16 @@ func (m Model) View() string {
 	if m.showRevise {
 		st := m.orch.Get(m.selectedID)
 		var phases []string
+		isRunning := false
 		if st != nil {
 			pipeline := st.GetPipeline()
 			idx := st.GetPipelineIndex()
 			if idx <= len(pipeline) {
 				phases = pipeline[:idx]
 			}
+			isRunning = st.GetStatus() == stream.StatusRunning
 		}
-		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, m.reviseFeedback, m.width, m.height)
+		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, isRunning, m.reviseFeedback, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -1674,12 +1676,15 @@ func renderCompleteOverlay(ti textarea.Model, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func renderReviseOverlay(phases []string, cursor, step int, feedback textarea.Model, width, height int) string {
+func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, feedback textarea.Model, width, height int) string {
 	overlay := overlayTitleStyle.Render("Revise Stream") + "\n\n"
 
 	if step == 1 {
 		if cursor >= 0 && cursor < len(phases) {
 			overlay += helpStyle.Render("Target phase: "+phases[cursor]) + "\n\n"
+		}
+		if isRunning {
+			overlay += helpStyle.Render("(will apply after current iteration completes)") + "\n\n"
 		}
 		overlay += "Feedback (optional):\n"
 		overlay += feedback.View() + "\n\n"
@@ -1697,7 +1702,11 @@ func renderReviseOverlay(phases []string, cursor, step int, feedback textarea.Mo
 			}
 			overlay += prefix + label + "\n"
 		}
-		overlay += "\n" + helpStyle.Render("j/k: navigate  enter: select  esc: cancel")
+		hint := "j/k: navigate  enter: select  esc: cancel"
+		if isRunning {
+			hint += "\n(will apply after current iteration completes)"
+		}
+		overlay += "\n" + helpStyle.Render(hint)
 	}
 
 	cap := 80
