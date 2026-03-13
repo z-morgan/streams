@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zmorgan/streams/internal/diagnosis"
+	"github.com/zmorgan/streams/internal/environment"
 	"github.com/zmorgan/streams/internal/loop"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/runtime/claude"
@@ -56,24 +57,26 @@ type Config struct {
 
 // Orchestrator manages the lifecycle of multiple streams.
 type Orchestrator struct {
-	mu      sync.RWMutex
-	streams map[string]*stream.Stream
-	cancels map[string]context.CancelFunc
-	done    map[string]chan struct{} // closed when loop goroutine exits
-	snaps   map[string]int           // persisted snapshot count per stream
-	store   *store.Store
-	sink    EventSink
-	config  Config
+	mu         sync.RWMutex
+	streams    map[string]*stream.Stream
+	cancels    map[string]context.CancelFunc
+	done       map[string]chan struct{} // closed when loop goroutine exits
+	snaps      map[string]int           // persisted snapshot count per stream
+	store      *store.Store
+	sink       EventSink
+	config     Config
+	envManager *environment.Manager
 }
 
-func New(s *store.Store, config Config) *Orchestrator {
+func New(s *store.Store, config Config, envManager *environment.Manager) *Orchestrator {
 	return &Orchestrator{
-		streams: make(map[string]*stream.Stream),
-		cancels: make(map[string]context.CancelFunc),
-		done:    make(map[string]chan struct{}),
-		snaps:   make(map[string]int),
-		store:   s,
-		config:  config,
+		streams:    make(map[string]*stream.Stream),
+		cancels:    make(map[string]context.CancelFunc),
+		done:       make(map[string]chan struct{}),
+		snaps:      make(map[string]int),
+		store:      s,
+		config:     config,
+		envManager: envManager,
 	}
 }
 
@@ -256,6 +259,18 @@ func (o *Orchestrator) Start(id string) error {
 	go func() {
 		defer close(doneCh)
 
+		// Provision environment if configured. Non-blocking failure: the
+		// stream continues without an environment, but logs the error.
+		if o.envManager != nil && o.envManager.Enabled() {
+			env, err := o.envManager.Ensure(ctx, id, st.WorkTree)
+			if err != nil {
+				slog.Warn("environment provisioning failed, continuing without environment", "stream", id, "err", err)
+			} else if env != nil {
+				st.SetEnvironmentPort(env.HostPort)
+				o.checkpoint(st)
+			}
+		}
+
 		promptDirs := o.promptOverrideDirs(st.ID)
 		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, factory, func(s *stream.Stream) {
 			o.checkpoint(s)
@@ -344,6 +359,11 @@ func (o *Orchestrator) Delete(id string, cleanup bool) error {
 	beadsID := st.BeadsParentID
 	o.mu.Unlock()
 
+	// Tear down environment if one exists.
+	if m := o.envManager; m != nil {
+		m.Teardown(context.Background(), id)
+	}
+
 	// Remove git worktree.
 	cmd := exec.Command("git", "worktree", "remove", worktree, "--force")
 	cmd.Dir = o.config.RepoDir
@@ -430,6 +450,11 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 		if err := checkCmd.Run(); err == nil {
 			return fmt.Errorf("branch %q already exists — choose a different name", branchName)
 		}
+	}
+
+	// Tear down environment if one exists.
+	if m := o.envManager; m != nil {
+		m.Teardown(context.Background(), id)
 	}
 
 	// Rename the worktree branch to the user-chosen name.
@@ -683,6 +708,18 @@ func (o *Orchestrator) StoreRoot() string {
 // RepoDir returns the repository directory.
 func (o *Orchestrator) RepoDir() string {
 	return o.config.RepoDir
+}
+
+// TeardownEnvironments tears down all active environments. Call on application exit.
+func (o *Orchestrator) TeardownEnvironments() {
+	if o.envManager != nil {
+		o.envManager.TeardownAll(context.Background())
+	}
+}
+
+// EnvManager returns the environment manager, or nil if environments are not configured.
+func (o *Orchestrator) EnvManager() *environment.Manager {
+	return o.envManager
 }
 
 // phaseFactory returns a PhaseFactory that handles config-driven phases.

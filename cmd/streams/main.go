@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/zmorgan/streams/internal/config"
+	"github.com/zmorgan/streams/internal/environment"
 	"github.com/zmorgan/streams/internal/loop"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/runtime"
@@ -100,6 +101,12 @@ func run() int {
 		}
 	}
 
+	envCfg, err := environment.LoadConfig(workDir)
+	if err != nil {
+		slog.Warn("failed to load environment config, environments disabled", "err", err)
+	}
+	envManager := environment.NewManager(envCfg)
+
 	s := &store.Store{Root: storeRoot}
 	orch := orchestrator.New(s, orchestrator.Config{
 		MaxIterations: maxIterations,
@@ -107,7 +114,7 @@ func run() int {
 		RepoDir:       workDir,
 		Pipeline:      pipelinePhases,
 		PolishSlots:   polishSlots,
-	})
+	}, envManager)
 
 	if err := orch.LoadExisting(); err != nil {
 		slog.Error("failed to load existing streams", "err", err)
@@ -145,6 +152,7 @@ func runTUI(orch *orchestrator.Orchestrator, storeRoot string) int {
 		slog.Error("TUI error", "err", err)
 		return 1
 	}
+	orch.TeardownEnvironments()
 	return 0
 }
 
