@@ -17,6 +17,8 @@ type Snapshot struct {
 	BeadsOpened      []string          // bead IDs opened by review step
 	BeadTitles       map[string]string // bead ID → title (nil for old snapshots)
 	SlotName         string   // polish phase slot name (empty for non-polish phases)
+	ReviseFrom       string // phase name we revised FROM (empty = not a revision)
+	ReviseFeedback   string // user's feedback prompt when requesting the revision
 	AutosquashErr    string   // non-empty if autosquash failed but loop continued
 	GuidanceConsumed []Guidance
 	Error            *LoopError // non-nil if iteration ended in error (partial snapshot)

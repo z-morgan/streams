@@ -120,9 +120,11 @@ type Stream struct {
 	ConvergeASAP  bool           // one-shot flag: skip next review to force convergence
 	PendingRevise *PendingRevise // queued revise for running streams
 	Notify        NotifySettings // notification preferences for converge/error events
-	OutputLines   []string       // ring buffer of recent CLI output for tail view
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	OutputLines    []string       // ring buffer of recent CLI output for tail view
+	reviseFrom     string         // transient: phase name we revised FROM (consumed by next snapshot)
+	reviseFeedback string         // transient: user feedback that triggered the revision
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (s *Stream) SetStatus(status Status) {
@@ -333,6 +335,25 @@ func (s *Stream) GetPendingRevise() *PendingRevise {
 	pr := s.PendingRevise
 	s.mu.RUnlock()
 	return pr
+}
+
+// SetReviseContext records the source phase and feedback for the next snapshot.
+func (s *Stream) SetReviseContext(from, feedback string) {
+	s.mu.Lock()
+	s.reviseFrom = from
+	s.reviseFeedback = feedback
+	s.mu.Unlock()
+}
+
+// DrainReviseContext atomically reads and clears the revision context fields.
+func (s *Stream) DrainReviseContext() (from, feedback string) {
+	s.mu.Lock()
+	from = s.reviseFrom
+	feedback = s.reviseFeedback
+	s.reviseFrom = ""
+	s.reviseFeedback = ""
+	s.mu.Unlock()
+	return
 }
 
 // DrainPendingRevise atomically reads and clears the PendingRevise field.
