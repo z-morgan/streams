@@ -2,9 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -20,6 +21,7 @@ type detailView struct {
 	beadFocused    bool   // true when bead-browse mode is active
 	beadCursor     int    // index into combined bead list (closed then opened)
 	beadShowOutput string // cached bd show output for the selected bead
+	snapScroll     int    // scroll offset in snapshot view when bead-focused
 }
 
 func (d *detailView) clampCursor(count int) {
@@ -158,9 +160,9 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 		cursorIdx := dv.iterCursor
 		if cursorIdx >= 0 && cursorIdx < len(rows) {
 			row := rows[cursorIdx]
-			if dv.beadFocused && row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) {
+			if dv.beadFocused && dv.beadShowOutput != "" {
 				rightTitle = "Beads"
-				right = renderBeadBrowse(snaps[row.SnapshotIndex], dv, innerRight)
+				right = wrapText(dv.beadShowOutput, innerRight)
 			} else if row.IsInitialPrompt {
 				rightTitle = "Prompt"
 				right = wrapText(st.Task, innerRight)
@@ -180,8 +182,17 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 				rightTitle = "Artifact"
 				right = renderArtifactDetail(snaps, row.SnapshotIndex, innerRight)
 			} else {
-				right = renderSnapshotDetail(snaps, row.SnapshotIndex, innerRight)
+				right, _ = renderSnapshotDetail(snaps, row.SnapshotIndex, innerRight, dv.beadFocused, dv.beadCursor)
 			}
+		}
+
+		// Scroll snapshot content to beads section when bead-focused.
+		if dv.beadFocused && dv.snapScroll > 0 && dv.beadShowOutput == "" {
+			rightLines := strings.Split(right, "\n")
+			if dv.snapScroll < len(rightLines) {
+				rightLines = rightLines[dv.snapScroll:]
+			}
+			right = strings.Join(rightLines, "\n")
 		}
 
 		right = detailStatusMarker(st) + "\n" + right
@@ -205,7 +216,8 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 				rightFooter = fmt.Sprintf("line %d/%d", endLine, totalLines)
 			}
 		}
-		b.WriteString(joinPanes(left, right, "Iterations", rightTitle, rightFooter, leftWidth, rightWidth, innerHeight, dv.focusRight))
+		rightFocused := dv.focusRight || dv.beadFocused
+		b.WriteString(joinPanes(left, right, "Iterations", rightTitle, rightFooter, leftWidth, rightWidth, innerHeight, rightFocused))
 	}
 
 	return b.String()
@@ -227,9 +239,9 @@ func isPausedAtBreakpoint(st *stream.Stream) bool {
 func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps []stream.Snapshot) string {
 	if dv.beadFocused {
 		if dv.beadShowOutput != "" {
-			return "esc: back to bead list"
+			return "esc: back to snapshot"
 		}
-		return "j/k: select bead  enter: show details  esc: back to snapshot"
+		return "j/k: select bead  enter: show details  esc: back to iterations"
 	}
 
 	if dv.focusRight {
@@ -332,7 +344,7 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 	for i, row := range rows {
 		label := ""
 		icon := ""
-		var iconColor lipgloss.Color
+		var iconColor color.Color
 
 		if row.IsPendingRevise {
 			reviseLabel := "↩ revise → " + row.PendingRevisePhase
@@ -430,11 +442,12 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 	return b.String()
 }
 
-func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string {
+func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFocused bool, beadCursor int) (string, int) {
 	if cursor < 0 || cursor >= len(snaps) {
-		return ""
+		return "", -1
 	}
 	snap := snaps[cursor]
+	beadsLine := -1
 
 	var b strings.Builder
 	hr := helpStyle.Render(strings.Repeat("─", width))
@@ -471,17 +484,21 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 	}
 
 	if len(snap.BeadsClosed) > 0 || len(snap.BeadsOpened) > 0 {
+		beadsLine = strings.Count(b.String(), "\n")
 		b.WriteString("\n" + hr + "\n")
 	}
 
 	successIcon := lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
 	openedIcon := lipgloss.NewStyle().Foreground(colorWarning).Render("+")
 
+	beadIdx := 0
 	if len(snap.BeadsClosed) > 0 {
 		b.WriteString(labelStyle.Render(fmt.Sprintf("Closed (%d)", len(snap.BeadsClosed))))
 		b.WriteString("\n")
 		for _, id := range snap.BeadsClosed {
-			b.WriteString("  " + successIcon + " " + beadLabel(id, snap.BeadTitles) + "\n")
+			label := beadLabel(id, snap.BeadTitles)
+			b.WriteString(renderBeadItem(label, successIcon, width, beadFocused && beadIdx == beadCursor))
+			beadIdx++
 		}
 	}
 
@@ -492,7 +509,9 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 		b.WriteString(labelStyle.Render(fmt.Sprintf("Opened (%d)", len(snap.BeadsOpened))))
 		b.WriteString("\n")
 		for _, id := range snap.BeadsOpened {
-			b.WriteString("  " + openedIcon + " " + beadLabel(id, snap.BeadTitles) + "\n")
+			label := beadLabel(id, snap.BeadTitles)
+			b.WriteString(renderBeadItem(label, openedIcon, width, beadFocused && beadIdx == beadCursor))
+			beadIdx++
 		}
 	}
 
@@ -518,7 +537,7 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 		b.WriteString(renderErrorBlock(snap.Error))
 	}
 
-	return b.String()
+	return b.String(), beadsLine
 }
 
 // colorizeDiffStat renders +/- characters in diff stat lines with green/red.
@@ -575,7 +594,7 @@ func renderErrorBlock(err *stream.LoopError) string {
 
 // borderedPane renders content inside a labeled bordered box.
 // title appears in the top border. footer (if non-empty) appears in the bottom border.
-func borderedPane(content, title, footer string, width, height int, borderColor lipgloss.Color) string {
+func borderedPane(content, title, footer string, width, height int, borderColor color.Color) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(borderColor)
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 
@@ -698,53 +717,25 @@ func snapshotBeadIDs(snap stream.Snapshot) []string {
 	return ids
 }
 
-// renderBeadBrowse renders the bead browse mode for a snapshot.
-// If beadShowOutput is set, it displays the full bd show output.
-// Otherwise it shows the navigable bead list.
-func renderBeadBrowse(snap stream.Snapshot, dv detailView, width int) string {
-	if dv.beadShowOutput != "" {
-		return wrapText(dv.beadShowOutput, width)
+// renderBeadItem renders a single bead line, with cursor highlighting when selected.
+func renderBeadItem(label, icon string, width int, selected bool) string {
+	if !selected {
+		return "  " + icon + " " + label + "\n"
 	}
-
-	var b strings.Builder
-	closedIcon := lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
-	openedIcon := lipgloss.NewStyle().Foreground(colorWarning).Render("+")
-
-	allIDs := snapshotBeadIDs(snap)
-	closedCount := len(snap.BeadsClosed)
-
-	for i, id := range allIDs {
-		icon := closedIcon
-		if i >= closedCount {
-			icon = openedIcon
-		}
-
-		label := beadLabel(id, snap.BeadTitles)
-
-		if i == dv.beadCursor {
-			bg := colorSubtle
-			accent := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render("▌")
-			text := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render(" " + label)
-
-			maxLabel := width - 4 // accent + icon + spaces
-			if lipgloss.Width(label) > maxLabel {
-				label = ansi.Truncate(label, maxLabel, "…")
-				text = lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render(" " + label)
-			}
-
-			pad := width - lipgloss.Width(accent) - lipgloss.Width(text) - lipgloss.Width(icon) - 1
-			if pad < 0 {
-				pad = 0
-			}
-			padStr := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
-			iconStr := lipgloss.NewStyle().Background(bg).Render(icon)
-			b.WriteString(accent + iconStr + text + padStr + "\n")
-		} else {
-			b.WriteString("  " + icon + " " + label + "\n")
-		}
+	bg := colorSubtle
+	accent := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render("▌")
+	maxLabel := width - 4 // accent + icon + spaces
+	if lipgloss.Width(label) > maxLabel {
+		label = ansi.Truncate(label, maxLabel, "…")
 	}
-
-	return b.String()
+	text := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render(" " + label)
+	iconStr := lipgloss.NewStyle().Background(bg).Render(icon)
+	pad := width - lipgloss.Width(accent) - lipgloss.Width(iconStr) - lipgloss.Width(text)
+	if pad < 0 {
+		pad = 0
+	}
+	padStr := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
+	return accent + iconStr + text + padStr + "\n"
 }
 
 func wrapText(s string, width int) string {

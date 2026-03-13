@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -280,7 +280,7 @@ func (m Model) Init() tea.Cmd {
 			_ = m.orch.Start(st.ID)
 		}
 	}
-	return tea.Batch(tea.WindowSize(), spinnerTick())
+	return tea.Batch(tea.RequestWindowSize, spinnerTick())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -311,7 +311,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Clear ephemeral messages on any keypress.
-	if _, ok := msg.(tea.KeyMsg); ok {
+	if _, ok := msg.(tea.KeyPressMsg); ok {
 		m.errorMsg = ""
 		m.statusMsg = ""
 	}
@@ -367,7 +367,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch m.view {
 		case viewDashboard:
 			return m.updateDashboard(msg)
@@ -477,7 +477,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	streams := m.orch.List()
 	m.dashboard.clampCursor(len(streams))
 
@@ -599,7 +599,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(m.selectedID)
 	var rows []iterationRow
 	var snaps []stream.Snapshot
@@ -633,6 +633,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detail.clampCursor(len(rows))
 		}
 		m.detail.tailScroll = 0
+		m.detail.snapScroll = 0
 
 	case "k", "up":
 		m.detail.iterCursor--
@@ -643,6 +644,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detail.clampCursor(len(rows))
 		}
 		m.detail.tailScroll = 0
+		m.detail.snapScroll = 0
 
 	case "enter":
 		cursor := m.detail.iterCursor
@@ -656,6 +658,17 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.detail.beadFocused = true
 					m.detail.beadCursor = 0
 					m.detail.beadShowOutput = ""
+					// Scroll snapshot to beads section.
+					leftWidth := 27
+					rightWidth := m.width - leftWidth
+					if rightWidth < 14 {
+						rightWidth = 14
+					}
+					innerRight := rightWidth - 2
+					_, beadsLine := renderSnapshotDetail(snaps, idx, innerRight, false, 0)
+					if beadsLine >= 0 {
+						m.detail.snapScroll = beadsLine
+					}
 				}
 			}
 		}
@@ -795,7 +808,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateDetailFocusRight(msg tea.KeyMsg, st *stream.Stream) (tea.Model, tea.Cmd) {
+func (m Model) updateDetailFocusRight(msg tea.KeyPressMsg, st *stream.Stream) (tea.Model, tea.Cmd) {
 	lineCount := 0
 	if st != nil {
 		lineCount = len(st.GetOutputLines())
@@ -827,7 +840,7 @@ func (m Model) updateDetailFocusRight(msg tea.KeyMsg, st *stream.Stream) (tea.Mo
 	return m, nil
 }
 
-func (m Model) updateDetailBeadBrowse(msg tea.KeyMsg, st *stream.Stream, rows []iterationRow) (tea.Model, tea.Cmd) {
+func (m Model) updateDetailBeadBrowse(msg tea.KeyPressMsg, st *stream.Stream, rows []iterationRow) (tea.Model, tea.Cmd) {
 	cursor := m.detail.iterCursor
 	var beadCount int
 	if cursor >= 0 && cursor < len(rows) {
@@ -846,6 +859,7 @@ func (m Model) updateDetailBeadBrowse(msg tea.KeyMsg, st *stream.Stream, rows []
 		} else {
 			m.detail.beadFocused = false
 			m.detail.beadCursor = 0
+			m.detail.snapScroll = 0
 		}
 		return m, nil
 
@@ -898,7 +912,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			if m.newStreamStep == 1 {
@@ -952,7 +966,7 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 	flat := flattenPhaseTree(phaseTree, 0)
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.newStreamStep = 1
@@ -971,7 +985,7 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case " ":
+		case "space":
 			name := flat[m.newStreamPhaseCur].Name
 			if m.newStreamChecked[name] {
 				// Unchecking: also uncheck children
@@ -1011,7 +1025,7 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 	gapCount := len(pipeline) - 1
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.newStreamStep = 2
@@ -1029,7 +1043,7 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case " ":
+		case "space":
 			m.newStreamBreakpoints[m.newStreamBPCursor] = !m.newStreamBreakpoints[m.newStreamBPCursor]
 			return m, nil
 
@@ -1067,7 +1081,7 @@ func (m Model) updateEditBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 	gapCount := len(pipeline) - 1
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.showEditBreakpoints = false
@@ -1085,7 +1099,7 @@ func (m Model) updateEditBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case " ":
+		case "space":
 			m.editBPMap[m.editBPCursor] = !m.editBPMap[m.editBPCursor]
 			return m, nil
 
@@ -1141,7 +1155,7 @@ func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, te
 
 func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "y":
 			m.showBeadsInit = false
@@ -1170,13 +1184,13 @@ func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.showGuidance = false
 			return m, nil
 
-		case "ctrl+s":
+		case "super+s", "ctrl+s":
 			text := m.guidanceInput.Value()
 			if text != "" && m.selectedID != "" {
 				m.orch.SendGuidance(m.selectedID, text)
@@ -1193,7 +1207,7 @@ func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateRestartPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "y":
 			m.showRestartPrompt = false
@@ -1213,7 +1227,7 @@ func (m Model) updateRestartPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateConvergeConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "w":
 			m.showConvergeConfirm = false
@@ -1235,7 +1249,7 @@ func (m Model) updateConvergeConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateForceAdvance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case ">":
 			m.showForceAdvance = false
@@ -1254,7 +1268,7 @@ func (m Model) updateForceAdvance(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "d":
 			m.showDeleteConfirm = false
@@ -1280,13 +1294,13 @@ func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateComplete(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.showComplete = false
 			return m, nil
 
-		case "ctrl+s":
+		case "super+s", "ctrl+s":
 			branch := m.completeInput.Value()
 			if branch == "" {
 				return m, nil
@@ -1320,7 +1334,7 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.reviseStep == -1 {
 		// Pending revise confirm step: r to replace, esc to cancel.
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc":
 				st.SetPendingRevise(nil)
@@ -1338,13 +1352,13 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.reviseStep == 1 {
 		// Feedback input step.
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case "esc":
 				m.reviseStep = 0
 				return m, nil
 
-			case "ctrl+s":
+			case "super+s", "ctrl+s":
 				m.showRevise = false
 				feedback := m.reviseFeedback.Value()
 				targetIdx := m.revisePhaseCursor
@@ -1363,7 +1377,7 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Phase picker step.
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.showRevise = false
@@ -1394,7 +1408,13 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	return v
+}
+
+func (m Model) viewString() string {
 	if m.showRestartPrompt {
 		return renderRestartPromptOverlay(m.width, m.height)
 	}
@@ -1655,7 +1675,7 @@ func renderBeadsInitOverlay(width, height int) string {
 func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
 	overlay := overlayTitleStyle.Render("Guidance") + "\n\n"
 	overlay += ti.View() + "\n\n"
-	overlay += helpStyle.Render("ctrl+s: send  esc: cancel")
+	overlay += helpStyle.Render("⌘S: send  esc: cancel")
 
 	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
@@ -1710,7 +1730,7 @@ func renderCompleteOverlay(ti textarea.Model, width, height int) string {
 	overlay += helpStyle.Render("Renames the branch, removes the worktree, and marks the stream as done.") + "\n\n"
 	overlay += "Branch name:\n"
 	overlay += ti.View() + "\n\n"
-	overlay += helpStyle.Render("ctrl+s: complete  esc: cancel")
+	overlay += helpStyle.Render("⌘S: complete  esc: cancel")
 
 	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
@@ -1735,7 +1755,7 @@ func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, pend
 		}
 		overlay += "Feedback (optional):\n"
 		overlay += feedback.View() + "\n\n"
-		overlay += helpStyle.Render("ctrl+s: revise  esc: back")
+		overlay += helpStyle.Render("⌘S: revise  esc: back")
 	} else {
 		overlay += "Select a phase to continue from:\n\n"
 		for i, name := range phases {

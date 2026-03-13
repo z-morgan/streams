@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/zmorgan/streams/internal/config"
 	"github.com/zmorgan/streams/internal/loop"
 	"github.com/zmorgan/streams/internal/orchestrator"
@@ -138,7 +138,7 @@ func runTUI(orch *orchestrator.Orchestrator, storeRoot string) int {
 	logger := slog.New(slog.NewTextHandler(logFile, nil))
 	slog.SetDefault(logger)
 
-	p := tea.NewProgram(ui.New(orch), tea.WithAltScreen())
+	p := tea.NewProgram(ui.New(orch))
 	orch.SetSink(&ui.EventSink{Program: p})
 
 	if _, err := p.Run(); err != nil {

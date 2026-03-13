@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 var (
 	// Colors
@@ -14,7 +18,7 @@ var (
 	colorHighlight = lipgloss.Color("39")  // cyan accent
 
 	// Status colors
-	statusColors = map[string]lipgloss.Color{
+	statusColors = map[string]color.Color{
 		"Created":   colorSecondary,
 		"Running":   colorPrimary,
 		"Paused":    colorWarning,
