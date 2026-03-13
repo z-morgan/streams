@@ -226,6 +226,10 @@ type diagnoseExitMsg struct {
 	err error
 }
 
+type beadShowMsg struct {
+	output string
+}
+
 // New creates a new TUI model.
 func New(orch *orchestrator.Orchestrator) Model {
 	ti := textarea.New()
@@ -446,6 +450,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case beadShowMsg:
+		m.detail.beadShowOutput = msg.output
+		return m, nil
+
 	case streamDeletedMsg:
 		if msg.err != nil {
 			m = m.withError("Error deleting stream: " + msg.err.Error())
@@ -588,14 +596,21 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(m.selectedID)
 	var rows []iterationRow
+	var snaps []stream.Snapshot
 	if st != nil {
 		rows = buildIterationList(st)
+		snaps = st.GetSnapshots()
 	}
 	m.detail.clampCursor(len(rows))
 
 	// When focused on the right pane (tail output), handle scroll keys
 	if m.detail.focusRight {
 		return m.updateDetailFocusRight(msg, st)
+	}
+
+	// When in bead browse mode, handle bead navigation
+	if m.detail.beadFocused {
+		return m.updateDetailBeadBrowse(msg, st, rows)
 	}
 
 	switch msg.String() {
@@ -618,6 +633,15 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if cursor >= 0 && cursor < len(rows) && rows[cursor].IsInProgress {
 			m.detail.focusRight = true
 			m.detail.tailScroll = 0
+		} else if cursor >= 0 && cursor < len(rows) && !rows[cursor].IsInitialPrompt {
+			if idx := rows[cursor].SnapshotIndex; idx >= 0 && idx < len(snaps) {
+				snap := snaps[idx]
+				if len(snap.BeadsClosed)+len(snap.BeadsOpened) > 0 {
+					m.detail.beadFocused = true
+					m.detail.beadCursor = 0
+					m.detail.beadShowOutput = ""
+				}
+			}
 		}
 
 	case "s":
@@ -767,6 +791,68 @@ func (m Model) updateDetailFocusRight(msg tea.KeyMsg, st *stream.Stream) (tea.Mo
 	return m, nil
 }
 
+func (m Model) updateDetailBeadBrowse(msg tea.KeyMsg, st *stream.Stream, rows []iterationRow) (tea.Model, tea.Cmd) {
+	cursor := m.detail.iterCursor
+	var beadCount int
+	if cursor >= 0 && cursor < len(rows) {
+		if idx := rows[cursor].SnapshotIndex; idx >= 0 {
+			snaps := st.GetSnapshots()
+			if idx < len(snaps) {
+				beadCount = len(snaps[idx].BeadsClosed) + len(snaps[idx].BeadsOpened)
+			}
+		}
+	}
+
+	switch msg.String() {
+	case "esc":
+		if m.detail.beadShowOutput != "" {
+			m.detail.beadShowOutput = ""
+		} else {
+			m.detail.beadFocused = false
+			m.detail.beadCursor = 0
+		}
+		return m, nil
+
+	case "j", "down":
+		if m.detail.beadShowOutput == "" && m.detail.beadCursor < beadCount-1 {
+			m.detail.beadCursor++
+		}
+
+	case "k", "up":
+		if m.detail.beadShowOutput == "" && m.detail.beadCursor > 0 {
+			m.detail.beadCursor--
+		}
+
+	case "enter":
+		if m.detail.beadShowOutput != "" {
+			return m, nil
+		}
+		if cursor >= 0 && cursor < len(rows) {
+			if idx := rows[cursor].SnapshotIndex; idx >= 0 {
+				snaps := st.GetSnapshots()
+				if idx < len(snaps) {
+					allIDs := snapshotBeadIDs(snaps[idx])
+					if m.detail.beadCursor >= 0 && m.detail.beadCursor < len(allIDs) {
+						beadID := allIDs[m.detail.beadCursor]
+						workDir := st.WorkTree
+						return m, func() tea.Msg {
+							cmd := exec.Command("bd", "show", beadID)
+							cmd.Dir = workDir
+							out, err := cmd.Output()
+							if err != nil {
+								return beadShowMsg{output: "Error: " + err.Error()}
+							}
+							return beadShowMsg{output: string(out)}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return m, nil
+}
+
 func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.newStreamStep == 3 {
 		return m.updateNewStreamBreakpoints(msg)
@@ -807,6 +893,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "alt+enter":
 			if m.newStreamStep == 1 {
 				m.newStreamInput.InsertString("\n")
+				m.autoSizeNewStreamInput()
 				return m, nil
 			}
 			return m, nil
@@ -821,6 +908,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.newStreamInput, cmd = m.newStreamInput.Update(msg)
+	m.autoSizeNewStreamInput()
 	return m, cmd
 }
 
@@ -1464,6 +1552,7 @@ func renderDeleteConfirmOverlay(name string, width, height int) string {
 
 func renderCompleteOverlay(ti textarea.Model, width, height int) string {
 	overlay := overlayTitleStyle.Render("Complete Stream") + "\n\n"
+	overlay += helpStyle.Render("Renames the branch, removes the worktree, and marks the stream as done.") + "\n\n"
 	overlay += "Branch name:\n"
 	overlay += ti.View() + "\n\n"
 	overlay += helpStyle.Render("ctrl+s: complete  esc: cancel")
@@ -1585,6 +1674,27 @@ func (m Model) inputWidth() int {
 		w = 20
 	}
 	return w
+}
+
+// autoSizeNewStreamInput adjusts the task textarea height to fit its content,
+// capped so the overlay doesn't exceed the terminal height.
+func (m *Model) autoSizeNewStreamInput() {
+	// Overlay chrome for step 1: title+step (1) + blank (1) + "Title: ..." (1) +
+	// blank (1) + "Task:" (1) + blank after textarea (1) + help line (1) +
+	// border (2) + padding (2) = 11 lines, plus 2 for top/bottom margin.
+	const chrome = 13
+	maxH := m.height - chrome
+	if maxH < 3 {
+		maxH = 3
+	}
+	h := m.newStreamInput.LineCount()
+	if h < 3 {
+		h = 3
+	}
+	if h > maxH {
+		h = maxH
+	}
+	m.newStreamInput.SetHeight(h)
 }
 
 // autoScrollChannels adjusts scrollLeft so the cursor stays in the visible window.

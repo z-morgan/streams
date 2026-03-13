@@ -15,6 +15,11 @@ type detailView struct {
 	focusRight   bool
 	showArtifact bool // toggle between snapshot summary and artifact file
 	contentWidth int  // layout width captured on entry; 0 = not yet set
+
+	// Bead browse mode: activated by pressing enter on a completed snapshot with beads.
+	beadFocused    bool   // true when bead-browse mode is active
+	beadCursor     int    // index into combined bead list (closed then opened)
+	beadShowOutput string // cached bd show output for the selected bead
 }
 
 func (d *detailView) clampCursor(count int) {
@@ -131,14 +136,18 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 		}
 		innerRight := rightWidth - 2 // content width inside right border
 
-		left := renderIterationList(rows, dv.iterCursor, leftWidth-2, dv.focusRight, spinnerFrame)
+		dimLeft := dv.focusRight || dv.beadFocused
+		left := renderIterationList(rows, dv.iterCursor, leftWidth-2, dimLeft, spinnerFrame)
 
 		var right string
 		rightTitle := "Snapshot"
 		cursorIdx := dv.iterCursor
 		if cursorIdx >= 0 && cursorIdx < len(rows) {
 			row := rows[cursorIdx]
-			if row.IsInitialPrompt {
+			if dv.beadFocused && row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) {
+				rightTitle = "Beads"
+				right = renderBeadBrowse(snaps[row.SnapshotIndex], dv, innerRight)
+			} else if row.IsInitialPrompt {
 				rightTitle = "Prompt"
 				right = wrapText(st.Task, innerRight)
 			} else if row.IsInProgress {
@@ -202,6 +211,13 @@ func isPausedAtBreakpoint(st *stream.Stream) bool {
 }
 
 func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps []stream.Snapshot) string {
+	if dv.beadFocused {
+		if dv.beadShowOutput != "" {
+			return "esc: back to bead list"
+		}
+		return "j/k: select bead  enter: show details  esc: back to snapshot"
+	}
+
 	if dv.focusRight {
 		return "j/k: scroll  G: bottom  esc: back to list"
 	}
@@ -630,6 +646,63 @@ func beadLabel(id string, titles map[string]string) string {
 		return id + " — " + title
 	}
 	return id
+}
+
+// snapshotBeadIDs returns the combined list of bead IDs (closed then opened) for a snapshot.
+func snapshotBeadIDs(snap stream.Snapshot) []string {
+	ids := make([]string, 0, len(snap.BeadsClosed)+len(snap.BeadsOpened))
+	ids = append(ids, snap.BeadsClosed...)
+	ids = append(ids, snap.BeadsOpened...)
+	return ids
+}
+
+// renderBeadBrowse renders the bead browse mode for a snapshot.
+// If beadShowOutput is set, it displays the full bd show output.
+// Otherwise it shows the navigable bead list.
+func renderBeadBrowse(snap stream.Snapshot, dv detailView, width int) string {
+	if dv.beadShowOutput != "" {
+		return wrapText(dv.beadShowOutput, width)
+	}
+
+	var b strings.Builder
+	closedIcon := lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
+	openedIcon := lipgloss.NewStyle().Foreground(colorWarning).Render("+")
+
+	allIDs := snapshotBeadIDs(snap)
+	closedCount := len(snap.BeadsClosed)
+
+	for i, id := range allIDs {
+		icon := closedIcon
+		if i >= closedCount {
+			icon = openedIcon
+		}
+
+		label := beadLabel(id, snap.BeadTitles)
+
+		if i == dv.beadCursor {
+			bg := colorSubtle
+			accent := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render("▌")
+			text := lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render(" " + label)
+
+			maxLabel := width - 4 // accent + icon + spaces
+			if lipgloss.Width(label) > maxLabel {
+				label = ansi.Truncate(label, maxLabel, "…")
+				text = lipgloss.NewStyle().Foreground(colorPrimary).Background(bg).Bold(true).Render(" " + label)
+			}
+
+			pad := width - lipgloss.Width(accent) - lipgloss.Width(text) - lipgloss.Width(icon) - 1
+			if pad < 0 {
+				pad = 0
+			}
+			padStr := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
+			iconStr := lipgloss.NewStyle().Background(bg).Render(icon)
+			b.WriteString(accent + iconStr + text + padStr + "\n")
+		} else {
+			b.WriteString("  " + icon + " " + label + "\n")
+		}
+	}
+
+	return b.String()
 }
 
 func wrapText(s string, width int) string {
