@@ -734,7 +734,11 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			fi.SetWidth(m.inputWidth())
 			m.reviseFeedback = fi
 			m.revisePhaseCursor = 0
-			m.reviseStep = 0
+			if st.GetPendingRevise() != nil {
+				m.reviseStep = -1 // pending confirm step
+			} else {
+				m.reviseStep = 0
+			}
 			m.showRevise = true
 			return m, nil
 		}
@@ -1313,6 +1317,24 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Phases available for revision: all before the current (review) phase.
 	phaseCount := pipelineIdx
 
+	if m.reviseStep == -1 {
+		// Pending revise confirm step: r to replace, esc to cancel.
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				st.SetPendingRevise(nil)
+				m.showRevise = false
+				return m, nil
+			case "r":
+				st.SetPendingRevise(nil)
+				m.reviseStep = 0
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+
 	if m.reviseStep == 1 {
 		// Feedback input step.
 		switch msg := msg.(type) {
@@ -1426,6 +1448,7 @@ func (m Model) View() string {
 		st := m.orch.Get(m.selectedID)
 		var phases []string
 		isRunning := false
+		var pendingTarget string
 		if st != nil {
 			pipeline := st.GetPipeline()
 			idx := st.GetPipelineIndex()
@@ -1433,8 +1456,11 @@ func (m Model) View() string {
 				phases = pipeline[:idx]
 			}
 			isRunning = st.GetStatus() == stream.StatusRunning
+			if pr := st.GetPendingRevise(); pr != nil && pr.TargetPhaseIndex < len(pipeline) {
+				pendingTarget = pipeline[pr.TargetPhaseIndex]
+			}
 		}
-		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, isRunning, m.reviseFeedback, m.width, m.height)
+		return renderReviseOverlay(phases, m.revisePhaseCursor, m.reviseStep, isRunning, pendingTarget, m.reviseFeedback, m.width, m.height)
 	}
 
 	if m.showGuidance {
@@ -1690,8 +1716,15 @@ func renderCompleteOverlay(ti textarea.Model, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, feedback textarea.Model, width, height int) string {
+func renderReviseOverlay(phases []string, cursor, step int, isRunning bool, pendingTarget string, feedback textarea.Model, width, height int) string {
 	overlay := overlayTitleStyle.Render("Revise Stream") + "\n\n"
+
+	if step == -1 {
+		overlay += fmt.Sprintf("Revise pending → %s\n\n", pendingTarget)
+		overlay += helpStyle.Render("r: change target  esc: cancel pending revise")
+		box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+	}
 
 	if step == 1 {
 		if cursor >= 0 && cursor < len(phases) {
