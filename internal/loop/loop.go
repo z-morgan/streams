@@ -329,6 +329,29 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 		pendingGuidance = s.DrainGuidance()
 
+		// Check for a queued revise request between iterations.
+		if pr := s.DrainPendingRevise(); pr != nil {
+			s.SetPipelineIndex(pr.TargetPhaseIndex)
+			s.SetConverged(false)
+			s.SetIteration(0)
+			if pr.Feedback != "" {
+				s.AddGuidance(stream.Guidance{
+					Text:      pr.Feedback,
+					Timestamp: time.Now(),
+				})
+			}
+			newPhase, err := factory(s.GetPipeline()[pr.TargetPhaseIndex])
+			if err != nil {
+				recordError(s, phase, stream.ErrInfra, stream.StepGuidance, "failed to instantiate revise target phase", err.Error())
+				return
+			}
+			phase = newPhase
+			pendingGuidance = s.DrainGuidance()
+			startIteration = 0
+			slog.Info("applying queued revise", "stream", s.ID, "targetPhase", newPhase.Name())
+			continue
+		}
+
 		s.SetIteration(iteration + 1)
 	}
 }
