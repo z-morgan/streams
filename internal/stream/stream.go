@@ -85,6 +85,13 @@ type NotifySettings struct {
 	System bool // macOS system notification via osascript
 }
 
+// PendingRevise stores a queued revise request for a running stream.
+// The loop checks this between iterations and applies it if set.
+type PendingRevise struct {
+	TargetPhaseIndex int
+	Feedback         string
+}
+
 const maxOutputLines = 200
 
 // Stream is the central state model for a running autonomous code generation loop.
@@ -111,6 +118,7 @@ type Stream struct {
 	Snapshots     []Snapshot
 	Guidance      []Guidance
 	ConvergeASAP  bool           // one-shot flag: skip next review to force convergence
+	PendingRevise *PendingRevise // queued revise for running streams
 	Notify        NotifySettings // notification preferences for converge/error events
 	OutputLines   []string       // ring buffer of recent CLI output for tail view
 	CreatedAt     time.Time
@@ -312,6 +320,28 @@ func (s *Stream) DrainConvergeASAP() bool {
 	s.ConvergeASAP = false
 	s.mu.Unlock()
 	return v
+}
+
+func (s *Stream) SetPendingRevise(pr *PendingRevise) {
+	s.mu.Lock()
+	s.PendingRevise = pr
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetPendingRevise() *PendingRevise {
+	s.mu.RLock()
+	pr := s.PendingRevise
+	s.mu.RUnlock()
+	return pr
+}
+
+// DrainPendingRevise atomically reads and clears the PendingRevise field.
+func (s *Stream) DrainPendingRevise() *PendingRevise {
+	s.mu.Lock()
+	pr := s.PendingRevise
+	s.PendingRevise = nil
+	s.mu.Unlock()
+	return pr
 }
 
 func (s *Stream) SetNotify(n NotifySettings) {

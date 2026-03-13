@@ -38,9 +38,15 @@ type streamData struct {
 	SessionID     string          `json:"session_id,omitempty"`
 	Notify        *notifyData     `json:"notify,omitempty"`
 	LastError     *errData        `json:"last_error,omitempty"`
-	Guidance      []guidanceData `json:"guidance,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	PendingRevise *pendingReviseData `json:"pending_revise,omitempty"`
+	Guidance      []guidanceData    `json:"guidance,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+}
+
+type pendingReviseData struct {
+	TargetPhaseIndex int    `json:"target_phase_index"`
+	Feedback         string `json:"feedback,omitempty"`
 }
 
 type guidanceData struct {
@@ -219,6 +225,12 @@ func toStreamData(st *stream.Stream) streamData {
 			Detail:  st.LastError.Detail,
 		}
 	}
+	if pr := st.GetPendingRevise(); pr != nil {
+		d.PendingRevise = &pendingReviseData{
+			TargetPhaseIndex: pr.TargetPhaseIndex,
+			Feedback:         pr.Feedback,
+		}
+	}
 	guidance := st.GetGuidance()
 	if len(guidance) > 0 {
 		d.Guidance = make([]guidanceData, len(guidance))
@@ -263,6 +275,12 @@ func fromStreamData(d streamData) *stream.Stream {
 		st.Guidance = make([]stream.Guidance, len(d.Guidance))
 		for i, g := range d.Guidance {
 			st.Guidance[i] = stream.Guidance{Text: g.Text, Timestamp: g.Timestamp}
+		}
+	}
+	if d.PendingRevise != nil {
+		st.PendingRevise = &stream.PendingRevise{
+			TargetPhaseIndex: d.PendingRevise.TargetPhaseIndex,
+			Feedback:         d.PendingRevise.Feedback,
 		}
 	}
 	if d.Notify != nil {
