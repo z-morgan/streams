@@ -456,8 +456,10 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 	return nil
 }
 
-// Revise resets a paused stream to an earlier pipeline phase with optional feedback,
-// then restarts it. The current code state is preserved — no commits are reverted.
+// Revise rewinds a stream to an earlier pipeline phase with optional feedback.
+// For paused/stopped streams, the revise is applied immediately and the stream
+// restarts. For running streams, the revise is queued and applied between
+// iterations by the loop.
 func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) error {
 	o.mu.Lock()
 	st := o.streams[id]
@@ -465,15 +467,20 @@ func (o *Orchestrator) Revise(id string, targetPhaseIndex int, feedback string) 
 		o.mu.Unlock()
 		return fmt.Errorf("stream %q not found", id)
 	}
-	if _, running := o.cancels[id]; running {
-		o.mu.Unlock()
-		return fmt.Errorf("stream %q is still running — stop it first", id)
-	}
+	_, running := o.cancels[id]
 	o.mu.Unlock()
 
 	currentIdx := st.GetPipelineIndex()
 	if targetPhaseIndex < 0 || targetPhaseIndex >= currentIdx {
 		return fmt.Errorf("target phase index %d must be less than current index %d", targetPhaseIndex, currentIdx)
+	}
+
+	if running {
+		st.SetPendingRevise(&stream.PendingRevise{
+			TargetPhaseIndex: targetPhaseIndex,
+			Feedback:         feedback,
+		})
+		return nil
 	}
 
 	st.SetPipelineIndex(targetPhaseIndex)
