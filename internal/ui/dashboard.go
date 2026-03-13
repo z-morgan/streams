@@ -225,6 +225,9 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 	for _, snap := range snapshots {
 		phaseCount[snap.Phase]++
 		label := fmt.Sprintf("%s %d", snap.Phase, phaseCount[snap.Phase])
+		if snap.ReviseFrom != "" {
+			label += " ↩"
+		}
 
 		style := iterRowStyle
 		if snap.Error != nil {

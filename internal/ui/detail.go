@@ -45,6 +45,7 @@ type iterationRow struct {
 	IsBreakpoint       bool
 	HasError           bool
 	IsInitialPrompt    bool
+	IsRevision         bool   // first iteration after a revision
 	IsPendingRevise    bool   // informational row: a revise is queued
 	PendingRevisePhase string // target phase name for the pending revise
 	Step               stream.IterStep // current step (only meaningful for in-progress rows)
@@ -68,6 +69,7 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 		rows = append(rows, iterationRow{
 			Phase:         snap.Phase,
 			Iteration:     phaseCount[snap.Phase] - 1, // 0-based; rendered as +1
+			IsRevision:    snap.ReviseFrom != "",
 			HasError:      snap.Error != nil,
 			SnapshotIndex: i,
 		})
@@ -364,6 +366,9 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 			label = "Initial Prompt"
 		} else {
 			label = fmt.Sprintf("%s %d", row.Phase, row.Iteration+1)
+			if row.IsRevision {
+				label += " ↩"
+			}
 			if row.IsInProgress {
 				if row.IsBreakpoint || row.IsPaused {
 					icon = "⏸"
