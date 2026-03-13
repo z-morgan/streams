@@ -157,7 +157,7 @@ func isRebaseInProgress(workDir string) bool {
 }
 
 func (p *CodingPhase) TransitionMode() Transition {
-	return TransitionPause
+	return TransitionAutoAdvance
 }
 
 func (p *CodingPhase) ArtifactFile() string { return "" }

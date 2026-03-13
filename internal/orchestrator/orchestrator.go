@@ -399,17 +399,50 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 	}
 	oldBranch := st.Branch
 	worktree := st.WorkTree
+	baseSHA := st.BaseSHA
 	o.mu.Unlock()
 
+	// Refuse to complete if there are uncommitted changes in the worktree.
+	// --force would silently destroy them.
+	if worktree != "" {
+		statusCmd := exec.Command("git", "status", "--porcelain")
+		statusCmd.Dir = worktree
+		statusOut, err := statusCmd.Output()
+		if err == nil && len(strings.TrimSpace(string(statusOut))) > 0 {
+			return fmt.Errorf("worktree has uncommitted changes — commit or discard them first")
+		}
+	}
+
+	// Refuse to complete if no commits were made beyond the base.
+	if worktree != "" && baseSHA != "" {
+		logCmd := exec.Command("git", "log", "--oneline", baseSHA+"..HEAD")
+		logCmd.Dir = worktree
+		logOut, err := logCmd.Output()
+		if err == nil && len(strings.TrimSpace(string(logOut))) == 0 {
+			return fmt.Errorf("no commits on branch — nothing to complete")
+		}
+	}
+
+	// Check that the target branch name doesn't already exist.
+	if oldBranch != branchName {
+		checkCmd := exec.Command("git", "rev-parse", "--verify", "refs/heads/"+branchName)
+		checkCmd.Dir = o.config.RepoDir
+		if err := checkCmd.Run(); err == nil {
+			return fmt.Errorf("branch %q already exists — choose a different name", branchName)
+		}
+	}
+
 	// Rename the worktree branch to the user-chosen name.
-	cmd := exec.Command("git", "branch", "-m", oldBranch, branchName)
-	cmd.Dir = o.config.RepoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git branch rename: %s", strings.TrimSpace(string(out)))
+	if oldBranch != branchName {
+		cmd := exec.Command("git", "branch", "-m", oldBranch, branchName)
+		cmd.Dir = o.config.RepoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git branch rename: %s", strings.TrimSpace(string(out)))
+		}
 	}
 
 	// Remove the worktree.
-	cmd = exec.Command("git", "worktree", "remove", worktree, "--force")
+	cmd := exec.Command("git", "worktree", "remove", worktree, "--force")
 	cmd.Dir = o.config.RepoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove: %s", strings.TrimSpace(string(out)))
