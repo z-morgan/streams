@@ -471,6 +471,16 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFo
 	}
 	b.WriteString("\n" + hr + "\n")
 
+	if snap.ReviseFrom != "" {
+		b.WriteString(labelStyle.Render("Revision"))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  Revised from: %s\n", snap.ReviseFrom))
+		if snap.ReviseFeedback != "" {
+			b.WriteString(fmt.Sprintf("  Feedback: %s\n", wrapText(snap.ReviseFeedback, width-2)))
+		}
+		b.WriteString("\n" + hr + "\n")
+	}
+
 	b.WriteString(labelStyle.Render("Implementation Agent's Report"))
 	b.WriteString("\n")
 	b.WriteString(wrapText(snap.Summary, width))
