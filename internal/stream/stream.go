@@ -120,6 +120,7 @@ type Stream struct {
 	ConvergeASAP  bool           // one-shot flag: skip next review to force convergence
 	PendingRevise *PendingRevise // queued revise for running streams
 	Notify        NotifySettings // notification preferences for converge/error events
+	EnvironmentPort int            // host port for containerized app server (0 = no environment)
 	OutputLines    []string       // ring buffer of recent CLI output for tail view
 	reviseFrom     string         // transient: phase name we revised FROM (consumed by next snapshot)
 	reviseFeedback string         // transient: user feedback that triggered the revision
@@ -363,6 +364,20 @@ func (s *Stream) DrainPendingRevise() *PendingRevise {
 	s.PendingRevise = nil
 	s.mu.Unlock()
 	return pr
+}
+
+func (s *Stream) SetEnvironmentPort(port int) {
+	s.mu.Lock()
+	s.EnvironmentPort = port
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetEnvironmentPort() int {
+	s.mu.RLock()
+	port := s.EnvironmentPort
+	s.mu.RUnlock()
+	return port
 }
 
 func (s *Stream) SetNotify(n NotifySettings) {

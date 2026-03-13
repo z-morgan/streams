@@ -253,6 +253,9 @@ func appendCommonArgs(args []string, req runtime.Request) []string {
 	if v, ok := req.Options["maxBudgetUsd"]; ok {
 		args = append(args, "--max-budget-usd", v)
 	}
+	if v, ok := req.Options["mcpConfig"]; ok && v != "" {
+		args = append(args, "--mcp-config", v)
+	}
 	return args
 }
 
