@@ -13,8 +13,9 @@ type Snapshot struct {
 	CostUSD          float64
 	DiffStat         string   // git diff --stat output (coding phase only)
 	CommitSHAs       []string // commits made this iteration (coding phase only)
-	BeadsClosed      []string // bead IDs closed by implement step
-	BeadsOpened      []string // bead IDs opened by review step
+	BeadsClosed      []string          // bead IDs closed by implement step
+	BeadsOpened      []string          // bead IDs opened by review step
+	BeadTitles       map[string]string // bead ID → title (nil for old snapshots)
 	SlotName         string   // polish phase slot name (empty for non-polish phases)
 	AutosquashErr    string   // non-empty if autosquash failed but loop continued
 	GuidanceConsumed []Guidance

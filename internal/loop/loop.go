@@ -256,6 +256,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			}
 		}
 
+		// Build title map for beads referenced in this snapshot.
+		var beadTitles map[string]string
+		if len(beadsClosed) > 0 || len(beadsOpened) > 0 {
+			beadTitles, _ = beads.FetchAllChildTitles(s.BeadsParentID)
+		}
+
 		snap := stream.Snapshot{
 			Phase:            phase.Name(),
 			Iteration:        iteration,
@@ -267,6 +273,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			CommitSHAs:       commitSHAs,
 			BeadsClosed:      beadsClosed,
 			BeadsOpened:      beadsOpened,
+			BeadTitles:       beadTitles,
 			AutosquashErr:    autosquashErr,
 			GuidanceConsumed: pendingGuidance,
 			Timestamp:        time.Now(),

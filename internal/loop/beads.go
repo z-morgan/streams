@@ -19,6 +19,7 @@ type Step struct {
 type BeadsQuerier interface {
 	ListOpenChildren(parentID string) ([]string, error)
 	FetchOrderedSteps(parentID string) ([]Step, error)
+	FetchAllChildTitles(parentID string) (map[string]string, error)
 }
 
 // CLIBeadsQuerier shells out to the bd CLI to query beads issues.
@@ -73,6 +74,19 @@ func (q *CLIBeadsQuerier) FetchOrderedSteps(parentID string) ([]Step, error) {
 	})
 
 	return steps, nil
+}
+
+func (q *CLIBeadsQuerier) FetchAllChildTitles(parentID string) (map[string]string, error) {
+	children, err := q.fetchChildren(parentID)
+	if err != nil {
+		return nil, err
+	}
+
+	titles := make(map[string]string, len(children))
+	for _, c := range children {
+		titles[c.ID] = c.Title
+	}
+	return titles, nil
 }
 
 // fetchChildren runs bd show --children --json and parses the map-keyed response.

@@ -50,6 +50,10 @@ func (m *mockBeads) FetchOrderedSteps(_ string) ([]Step, error) {
 	return m.steps, nil
 }
 
+func (m *mockBeads) FetchAllChildTitles(_ string) (map[string]string, error) {
+	return nil, nil
+}
+
 // mockGit returns a fixed HEAD SHA that increments per call.
 type mockGit struct {
 	headCalls int
