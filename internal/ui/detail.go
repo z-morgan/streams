@@ -11,11 +11,12 @@ import (
 )
 
 type detailView struct {
-	iterCursor   int
-	tailScroll   int
-	focusRight   bool
-	showArtifact bool // toggle between snapshot summary and artifact file
-	contentWidth int  // layout width captured on entry; 0 = not yet set
+	iterCursor     int
+	tailScroll     int
+	focusRight     bool
+	showArtifact   bool // toggle between snapshot summary and artifact file
+	contentWidth   int  // layout width captured on entry; 0 = not yet set
+	artifactScroll int  // scroll offset when focused on artifact content
 
 	// Bead browse mode: activated by pressing enter on a completed snapshot with beads.
 	beadFocused    bool   // true when bead-browse mode is active
@@ -197,6 +198,23 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 			right = strings.Join(rightLines, "\n")
 		}
 
+		// Scroll artifact content when focused on artifact pane.
+		var artifactTotalLines int
+		if dv.showArtifact && dv.focusRight {
+			rightLines := strings.Split(right, "\n")
+			artifactTotalLines = len(rightLines)
+			if dv.artifactScroll > 0 {
+				scroll := dv.artifactScroll
+				if scroll >= artifactTotalLines {
+					scroll = artifactTotalLines - 1
+				}
+				if scroll > 0 {
+					rightLines = rightLines[scroll:]
+					right = strings.Join(rightLines, "\n")
+				}
+			}
+		}
+
 		right = detailStatusMarker(st) + "\n" + right
 
 		// Subtract 2 from paneHeight for top+bottom border lines
@@ -205,9 +223,11 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 			innerHeight = 3
 		}
 
-		// Scroll position footer for live output
+		// Scroll position footer for live output or artifact
 		var rightFooter string
-		if cursorIdx >= 0 && cursorIdx < len(rows) && rows[cursorIdx].IsInProgress {
+		if dv.showArtifact && dv.focusRight && dv.artifactScroll > 0 && artifactTotalLines > 0 {
+			rightFooter = fmt.Sprintf("line %d/%d", dv.artifactScroll+1, artifactTotalLines)
+		} else if cursorIdx >= 0 && cursorIdx < len(rows) && rows[cursorIdx].IsInProgress {
 			outputLines := st.GetOutputLines()
 			totalLines := len(outputLines)
 			if totalLines > 0 && dv.tailScroll > 0 {
@@ -247,6 +267,9 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 	}
 
 	if dv.focusRight {
+		if dv.showArtifact {
+			return "j/k: scroll  G: bottom  f: back to summary  esc: back to list"
+		}
 		return "j/k: scroll  G: bottom  esc: back to list"
 	}
 
@@ -335,6 +358,10 @@ func detailStatusMarker(st *stream.Stream) string {
 
 	if st.WorkTree != "" {
 		marker += "  " + helpStyle.Render("worktree: "+st.Branch)
+	}
+
+	if port := st.GetEnvironmentPort(); port > 0 {
+		marker += "  " + lipgloss.NewStyle().Foreground(colorSuccess).Render(fmt.Sprintf("server: :%d", port))
 	}
 
 	return marker
