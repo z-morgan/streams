@@ -98,7 +98,7 @@ type Stream struct {
 	Status        Status
 	Pipeline      []string // ordered macro-phase names, e.g. ["plan","decompose","coding"]
 	PipelineIndex int      // which macro-phase is active
-	Breakpoints   []int   // pipeline indices where the stream pauses after convergence
+	Breakpoints   []int    // pipeline indices where the stream pauses after convergence
 	IterStep      IterStep
 	Iteration     int // iteration count within current macro-phase
 	Converged     bool
@@ -226,6 +226,14 @@ func (s *Stream) GetPipeline() []string {
 	p := s.Pipeline
 	s.mu.RUnlock()
 	return p
+}
+
+func (s *Stream) SetBreakpoints(bp []int) {
+	s.mu.Lock()
+	s.Breakpoints = make([]int, len(bp))
+	copy(s.Breakpoints, bp)
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
 }
 
 func (s *Stream) GetBreakpoints() []int {

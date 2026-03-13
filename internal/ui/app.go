@@ -147,6 +147,12 @@ type Model struct {
 	pendingBreakpoints []int                 // breakpoints stashed while waiting for stealth answer
 	pendingNotify      stream.NotifySettings // notify settings stashed while waiting for stealth answer
 
+	// Edit breakpoints overlay state.
+	showEditBreakpoints bool
+	editBPMap           map[int]bool // which pipeline gaps have breakpoints
+	editBPCursor        int          // cursor into breakpoint gaps
+	editBPNotify        stream.NotifySettings
+
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
 
@@ -342,6 +348,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle force-advance confirmation overlay if active.
 	if m.showForceAdvance {
 		return m.updateForceAdvance(msg)
+	}
+
+	// Handle edit breakpoints overlay if active.
+	if m.showEditBreakpoints {
+		return m.updateEditBreakpoints(msg)
 	}
 
 	// Handle complete overlay if active.
@@ -666,6 +677,22 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "f":
 		m.detail.showArtifact = !m.detail.showArtifact
+
+	case "b":
+		if st != nil && st.GetStatus() != stream.StatusCompleted {
+			pipeline := st.GetPipeline()
+			if len(pipeline) > 1 {
+				bpMap := make(map[int]bool)
+				for _, bp := range st.GetBreakpoints() {
+					bpMap[bp] = true
+				}
+				m.editBPMap = bpMap
+				m.editBPCursor = 0
+				m.editBPNotify = st.GetNotify()
+				m.showEditBreakpoints = true
+				return m, nil
+			}
+		}
 
 	case "d":
 		if st != nil && !m.orch.IsRunning(st.ID) {
@@ -1021,6 +1048,65 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateEditBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
+	st := m.orch.Get(m.selectedID)
+	if st == nil {
+		m.showEditBreakpoints = false
+		return m, nil
+	}
+	pipeline := st.GetPipeline()
+	gapCount := len(pipeline) - 1
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.showEditBreakpoints = false
+			return m, nil
+
+		case "j", "down":
+			if m.editBPCursor < gapCount-1 {
+				m.editBPCursor++
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.editBPCursor > 0 {
+				m.editBPCursor--
+			}
+			return m, nil
+
+		case " ":
+			m.editBPMap[m.editBPCursor] = !m.editBPMap[m.editBPCursor]
+			return m, nil
+
+		case "1":
+			m.editBPNotify.Bell = !m.editBPNotify.Bell
+			return m, nil
+		case "2":
+			m.editBPNotify.Flash = !m.editBPNotify.Flash
+			return m, nil
+		case "3":
+			m.editBPNotify.System = !m.editBPNotify.System
+			return m, nil
+
+		case "enter":
+			var breakpoints []int
+			for i := 0; i < gapCount; i++ {
+				if m.editBPMap[i] {
+					breakpoints = append(breakpoints, i)
+				}
+			}
+			st.SetBreakpoints(breakpoints)
+			st.SetNotify(m.editBPNotify)
+			m.showEditBreakpoints = false
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
 func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, tea.Cmd) {
 	title := m.newStreamTitle.Value()
 	task := m.newStreamInput.Value()
@@ -1320,6 +1406,13 @@ func (m Model) View() string {
 		return renderForceAdvanceOverlay(nextPhase, m.width, m.height)
 	}
 
+	if m.showEditBreakpoints {
+		st := m.orch.Get(m.selectedID)
+		if st != nil {
+			return renderEditBreakpointsOverlay(st.GetPipeline(), m.editBPMap, m.editBPCursor, m.editBPNotify, m.width, m.height)
+		}
+	}
+
 	if m.showComplete {
 		return renderCompleteOverlay(m.completeInput, m.width, m.height)
 	}
@@ -1482,6 +1575,35 @@ func renderNotifyToggles(notify stream.NotifySettings) string {
 		return "○"
 	}
 	return helpStyle.Render(fmt.Sprintf("  Notify: 1 %s bell  2 %s flash  3 %s system", dot(notify.Bell), dot(notify.Flash), dot(notify.System)))
+}
+
+func renderEditBreakpointsOverlay(pipeline []string, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
+	overlay := overlayTitleStyle.Render("Edit Breakpoints") + "\n\n"
+	overlay += "Set breakpoints (pause between phases):\n"
+	overlay += helpStyle.Render("  You'll be notified when the stream pauses at each breakpoint.") + "\n\n"
+	for i, name := range pipeline {
+		overlay += "  " + name + "\n"
+		if i < len(pipeline)-1 {
+			cursor := "  "
+			if i == bpCursor {
+				cursor = cursorStyle.Render("> ")
+			}
+			check := "[ ]"
+			if breakpoints[i] {
+				check = "[x]"
+			}
+			label := fmt.Sprintf("── %s pause after %s ──", check, name)
+			if i == bpCursor {
+				label = selectedRowStyle.Render(label)
+			}
+			overlay += cursor + label + "\n"
+		}
+	}
+	overlay += "\n" + renderNotifyToggles(notify) + "\n"
+	overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: save  esc: cancel")
+
+	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func renderBeadsInitOverlay(width, height int) string {
