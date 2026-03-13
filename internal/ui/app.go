@@ -507,6 +507,10 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.detail.iterCursor < 0 {
 				m.detail.iterCursor = 0
 			}
+			// Skip non-selectable rows (pending revise indicator).
+			if m.detail.iterCursor > 0 && m.detail.iterCursor < len(rows) && rows[m.detail.iterCursor].IsPendingRevise {
+				m.detail.iterCursor--
+			}
 			return m, tailTick()
 		} else {
 			return m.setStatus("No stream selected. Press n to create one.")
@@ -623,11 +627,21 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "down":
 		m.detail.iterCursor++
 		m.detail.clampCursor(len(rows))
+		// Skip non-selectable rows (pending revise indicator).
+		if m.detail.iterCursor < len(rows) && rows[m.detail.iterCursor].IsPendingRevise {
+			m.detail.iterCursor++
+			m.detail.clampCursor(len(rows))
+		}
 		m.detail.tailScroll = 0
 
 	case "k", "up":
 		m.detail.iterCursor--
 		m.detail.clampCursor(len(rows))
+		// Skip non-selectable rows (pending revise indicator).
+		if m.detail.iterCursor >= 0 && m.detail.iterCursor < len(rows) && rows[m.detail.iterCursor].IsPendingRevise {
+			m.detail.iterCursor--
+			m.detail.clampCursor(len(rows))
+		}
 		m.detail.tailScroll = 0
 
 	case "enter":

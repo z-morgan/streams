@@ -36,15 +36,17 @@ func (d *detailView) clampCursor(count int) {
 }
 
 type iterationRow struct {
-	Phase           string
-	Iteration       int
-	IsInProgress    bool
-	IsPaused        bool
-	IsBreakpoint    bool
-	HasError        bool
-	IsInitialPrompt bool
-	Step            stream.IterStep // current step (only meaningful for in-progress rows)
-	SnapshotIndex   int             // -1 for non-snapshot rows
+	Phase              string
+	Iteration          int
+	IsInProgress       bool
+	IsPaused           bool
+	IsBreakpoint       bool
+	HasError           bool
+	IsInitialPrompt    bool
+	IsPendingRevise    bool   // informational row: a revise is queued
+	PendingRevisePhase string // target phase name for the pending revise
+	Step               stream.IterStep // current step (only meaningful for in-progress rows)
+	SnapshotIndex      int             // -1 for non-snapshot rows
 }
 
 func buildIterationList(st *stream.Stream) []iterationRow {
@@ -80,6 +82,18 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 			Step:          st.GetIterStep(),
 			SnapshotIndex: -1,
 		})
+		if pr := st.GetPendingRevise(); pr != nil {
+			pipeline := st.GetPipeline()
+			targetName := "?"
+			if pr.TargetPhaseIndex < len(pipeline) {
+				targetName = pipeline[pr.TargetPhaseIndex]
+			}
+			rows = append(rows, iterationRow{
+				IsPendingRevise:    true,
+				PendingRevisePhase: targetName,
+				SnapshotIndex:      -1,
+			})
+		}
 	} else if status == stream.StatusPaused {
 		// Append a paused row if the last snapshot for this phase already
 		// covers the current state (e.g. an error snapshot).
@@ -319,6 +333,20 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 		label := ""
 		icon := ""
 		var iconColor lipgloss.Color
+
+		if row.IsPendingRevise {
+			reviseLabel := "↩ revise → " + row.PendingRevisePhase
+			iconStr := lipgloss.NewStyle().Foreground(colorWarning).Render("↩")
+			textStr := lipgloss.NewStyle().Foreground(colorMuted).Render(" revise → " + row.PendingRevisePhase)
+			maxLabel := width - 2 // prefix
+			full := iconStr + textStr
+			if lipgloss.Width(full) > maxLabel {
+				full = ansi.Truncate(reviseLabel, maxLabel, "…")
+				full = lipgloss.NewStyle().Foreground(colorMuted).Render(full)
+			}
+			b.WriteString("  " + full + "\n")
+			continue
+		}
 
 		if row.IsInitialPrompt {
 			label = "Initial Prompt"
