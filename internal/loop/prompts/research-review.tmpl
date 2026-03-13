@@ -5,10 +5,11 @@ Parent issue: {{.ParentID}}
 
 Steps:
 1. Read research.md.
-2. Evaluate: Does the research cover the relevant parts of the codebase? Are there blind spots? Is anything inaccurate or superficial?
-3. For each improvement, file a child issue:
+2. Read the task description above. If it specifies a research methodology (running an app, using browser tools, testing workflows, etc.), verify that the research shows evidence of actually following that methodology — not just documenting the same information through code reading alone.
+3. Evaluate: Does the research cover the relevant parts of the codebase? Are there blind spots? Is anything inaccurate or superficial?
+4. For each improvement, file a child issue:
    bd create --parent {{.ParentID}} --title="<specific action>" --type=task --priority=2 --description="<what to research and why>"
-4. After your review, write a brief summary (2-4 sentences) of your overall assessment as your FINAL output. If you filed issues, summarize what you found. If the research is sufficient with no issues filed, respond with exactly: "No further improvements needed."
+5. After your review, write a brief summary (2-4 sentences) of your overall assessment as your FINAL output. If you filed issues, summarize what you found. If the research is sufficient with no issues filed, respond with exactly: "No further improvements needed."
 
 IMPORTANT: Your summary text MUST be the very last thing you output. Do not end on a tool call. The summary is captured and displayed to the human operator.
 

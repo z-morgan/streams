@@ -178,6 +178,53 @@ func TestLoadPrompt_OverrideDirsPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadPrompt_ResearchImplementMethodologyFirst(t *testing.T) {
+	original := userPromptsDir
+	userPromptsDir = func() string { return "" }
+	defer func() { userPromptsDir = original }()
+
+	data := PromptData{
+		Task:      "Run the app with `ruby app.rb` and probe it with chrome-devtools-mcp",
+		Iteration: 0,
+	}
+
+	prompt, err := LoadPrompt("research", "implement", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The prompt should instruct the agent to follow task-specified methodology first.
+	if !strings.Contains(prompt, "follow that methodology") {
+		t.Error("expected research-implement to instruct following task-specified methodology")
+	}
+
+	// The task content should appear in the rendered prompt.
+	if !strings.Contains(prompt, "chrome-devtools-mcp") {
+		t.Error("expected prompt to contain the task description")
+	}
+}
+
+func TestLoadPrompt_ResearchReviewMethodologyCompliance(t *testing.T) {
+	original := userPromptsDir
+	userPromptsDir = func() string { return "" }
+	defer func() { userPromptsDir = original }()
+
+	data := PromptData{
+		Task:     "Run the app and test all endpoints",
+		ParentID: "test-parent",
+	}
+
+	prompt, err := LoadPrompt("research", "review", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The review prompt should check methodology compliance.
+	if !strings.Contains(prompt, "verify that the research shows evidence") {
+		t.Error("expected research-review to check methodology compliance")
+	}
+}
+
 func TestLoadPrompt_MalformedUserTemplate(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(
