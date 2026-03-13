@@ -423,7 +423,7 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 		b.WriteString(labelStyle.Render(fmt.Sprintf("Closed (%d)", len(snap.BeadsClosed))))
 		b.WriteString("\n")
 		for _, id := range snap.BeadsClosed {
-			b.WriteString("  " + successIcon + " " + id + "\n")
+			b.WriteString("  " + successIcon + " " + beadLabel(id, snap.BeadTitles) + "\n")
 		}
 	}
 
@@ -434,7 +434,7 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int) string
 		b.WriteString(labelStyle.Render(fmt.Sprintf("Opened (%d)", len(snap.BeadsOpened))))
 		b.WriteString("\n")
 		for _, id := range snap.BeadsOpened {
-			b.WriteString("  " + openedIcon + " " + id + "\n")
+			b.WriteString("  " + openedIcon + " " + beadLabel(id, snap.BeadTitles) + "\n")
 		}
 	}
 
@@ -614,10 +614,22 @@ func reviewFallback(snap stream.Snapshot) string {
 	if n == 0 {
 		return ""
 	}
-	if n == 1 {
-		return fmt.Sprintf("Filed 1 issue: %s", snap.BeadsOpened[0])
+	labels := make([]string, n)
+	for i, id := range snap.BeadsOpened {
+		labels[i] = beadLabel(id, snap.BeadTitles)
 	}
-	return fmt.Sprintf("Filed %d issues: %s", n, strings.Join(snap.BeadsOpened, ", "))
+	if n == 1 {
+		return fmt.Sprintf("Filed 1 issue: %s", labels[0])
+	}
+	return fmt.Sprintf("Filed %d issues: %s", n, strings.Join(labels, ", "))
+}
+
+// beadLabel returns "id — title" when a title is available, otherwise just the id.
+func beadLabel(id string, titles map[string]string) string {
+	if title, ok := titles[id]; ok && title != "" {
+		return id + " — " + title
+	}
+	return id
 }
 
 func wrapText(s string, width int) string {
