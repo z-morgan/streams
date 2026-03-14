@@ -94,12 +94,9 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		// resuming a paused stream gets a fresh budget rather than immediately
 		// re-pausing at the same limit.
 		if maxIterations > 0 && s.GetIteration()-startIteration >= maxIterations {
-			s.SetLastError(&stream.LoopError{
-				Kind:    stream.ErrMaxIterations,
-				Step:    stream.StepImplement,
-				Message: fmt.Sprintf("iteration limit (%d) reached", maxIterations),
-			})
-			s.SetStatus(stream.StatusPaused)
+			detail := buildMaxIterDiagnostic(s, phase, beads)
+			recordError(s, phase, stream.ErrMaxIterations, stream.StepImplement,
+				fmt.Sprintf("iteration limit (%d) reached", maxIterations), detail)
 			return
 		}
 
@@ -505,7 +502,7 @@ func classifyError(err error) stream.ErrorKind {
 	if strings.Contains(msg, "budget") {
 		return stream.ErrBudget
 	}
-	for _, s := range []string{"rate limit", "rate_limit", "429", "overloaded", "too many requests", "usage limit"} {
+	for _, s := range []string{"rate limit", "rate_limit", "429", "overloaded", "too many requests", "usage limit", "hit your limit"} {
 		if strings.Contains(msg, s) {
 			return stream.ErrRateLimit
 		}
@@ -513,9 +510,63 @@ func classifyError(err error) stream.ErrorKind {
 	return stream.ErrRuntime
 }
 
+// buildMaxIterDiagnostic generates a detail string for MaxIterations errors
+// by analysing the stream's snapshots for the current phase.
+func buildMaxIterDiagnostic(s *stream.Stream, phase MacroPhase, beads BeadsQuerier) string {
+	phaseName := phase.Name()
+	snaps := s.GetSnapshots()
+
+	var phaseSnaps []stream.Snapshot
+	for _, snap := range snaps {
+		if snap.Phase == phaseName && snap.Error == nil {
+			phaseSnaps = append(phaseSnaps, snap)
+		}
+	}
+	if len(phaseSnaps) == 0 {
+		return ""
+	}
+
+	reviewFiledCount := 0
+	totalOpened := 0
+	totalClosed := 0
+	for _, snap := range phaseSnaps {
+		if len(snap.BeadsOpened) > 0 {
+			reviewFiledCount++
+		}
+		totalOpened += len(snap.BeadsOpened)
+		totalClosed += len(snap.BeadsClosed)
+	}
+
+	var b strings.Builder
+	total := len(phaseSnaps)
+	if reviewFiledCount == total {
+		fmt.Fprintf(&b, "Review filed new issues on %d of %d iterations (never converged).", reviewFiledCount, total)
+	} else {
+		fmt.Fprintf(&b, "Review filed new issues on %d of %d iterations.", reviewFiledCount, total)
+	}
+	fmt.Fprintf(&b, " %d issues opened, %d closed across the phase.", totalOpened, totalClosed)
+
+	openIDs, err := beads.ListOpenChildren(s.BeadsParentID)
+	if err == nil && len(openIDs) > 0 {
+		titles, _ := beads.FetchAllChildTitles(s.BeadsParentID)
+		labels := make([]string, len(openIDs))
+		for i, id := range openIDs {
+			if title, ok := titles[id]; ok && title != "" {
+				labels[i] = fmt.Sprintf("%s (%q)", id, title)
+			} else {
+				labels[i] = id
+			}
+		}
+		fmt.Fprintf(&b, " %d issues still open: %s.", len(openIDs), strings.Join(labels, ", "))
+	}
+
+	return b.String()
+}
+
 func recordError(s *stream.Stream, phase MacroPhase, kind stream.ErrorKind, step stream.IterStep, msg, detail string) {
 	loopErr := &stream.LoopError{
 		Kind:    kind,
+		Phase:   phase.Name(),
 		Step:    step,
 		Message: msg,
 		Detail:  detail,

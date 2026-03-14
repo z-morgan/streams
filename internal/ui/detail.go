@@ -175,7 +175,7 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 					right += "\n" + helpStyle.Render("(breakpoint — press s to continue, g to add guidance)")
 				} else if row.IsPaused {
 					if err := st.GetLastError(); err != nil {
-						right += "\n" + renderErrorBlock(err)
+						right += "\n" + renderErrorBlock(err, snaps)
 					} else {
 						right += "\n" + helpStyle.Render("(paused)")
 					}
@@ -289,10 +289,12 @@ func buildDetailCtx(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 func detailStatusMarker(st *stream.Stream) string {
 	status := st.GetStatus()
 	name := status.String()
+	modelTag := detailModelTag(st)
 
 	if status == stream.StatusCompleted {
 		marker := lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("[Completed]")
 		marker += "  " + helpStyle.Render("branch: "+st.Branch)
+		marker += modelTag
 		return marker
 	}
 
@@ -301,6 +303,7 @@ func detailStatusMarker(st *stream.Stream) string {
 		if st.WorkTree != "" {
 			marker += "  " + helpStyle.Render("worktree: "+st.Branch)
 		}
+		marker += modelTag
 		return marker
 	}
 
@@ -328,7 +331,22 @@ func detailStatusMarker(st *stream.Stream) string {
 		marker += "  " + lipgloss.NewStyle().Foreground(colorSuccess).Render(fmt.Sprintf("server: :%d", port))
 	}
 
+	marker += modelTag
 	return marker
+}
+
+// detailModelTag returns the "model: <name>" fragment for the status header.
+func detailModelTag(st *stream.Stream) string {
+	pipeline := st.GetPipeline()
+	idx := st.GetPipelineIndex()
+	if len(pipeline) == 0 || idx < 0 || idx >= len(pipeline) {
+		return ""
+	}
+	model := st.GetModels().ModelForPhase(pipeline[idx])
+	if model == "" {
+		model = "default"
+	}
+	return "  " + helpStyle.Render("model: "+model)
 }
 
 func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool, spinnerFrame string) string {
@@ -544,7 +562,7 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFo
 
 	if snap.Error != nil {
 		b.WriteString("\n")
-		b.WriteString(renderErrorBlock(snap.Error))
+		b.WriteString(renderErrorBlock(snap.Error, snaps))
 	}
 
 	return b.String()
@@ -590,14 +608,23 @@ func renderArtifactDetail(snaps []stream.Snapshot, cursor int, width int) string
 	return b.String()
 }
 
-func renderErrorBlock(err *stream.LoopError) string {
+func renderErrorBlock(err *stream.LoopError, snaps []stream.Snapshot) string {
 	fieldStyle := lipgloss.NewStyle().Foreground(colorSecondary)
 	var b strings.Builder
 	b.WriteString(fieldStyle.Render("Kind:") + " " + err.Kind.String() + "\n")
+	if err.Phase != "" {
+		b.WriteString(fieldStyle.Render("Phase:") + " " + err.Phase + "\n")
+	}
 	b.WriteString(fieldStyle.Render("Step:") + " " + err.Step.String() + "\n")
 	b.WriteString(fieldStyle.Render("Message:") + " " + err.Message)
 	if err.Detail != "" {
 		b.WriteString("\n" + fieldStyle.Render("Detail:") + "\n" + err.Detail)
+	}
+	if err.Kind == stream.ErrMaxIterations && err.Phase != "" {
+		hint := stream.MaxIterHint(snaps, err.Phase)
+		if hint != "" {
+			b.WriteString("\n\n" + lipgloss.NewStyle().Foreground(colorWarning).Render("Hint: ") + hint)
+		}
 	}
 	return errorBlockStyle.Render(b.String())
 }

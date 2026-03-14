@@ -76,6 +76,7 @@ type notifyData struct {
 
 type errData struct {
 	Kind    string `json:"kind"`
+	Phase   string `json:"phase,omitempty"`
 	Step    string `json:"step"`
 	Message string `json:"message"`
 	Detail  string `json:"detail"`
@@ -244,6 +245,7 @@ func toStreamData(st *stream.Stream) streamData {
 	if st.LastError != nil {
 		d.LastError = &errData{
 			Kind:    st.LastError.Kind.String(),
+			Phase:   st.LastError.Phase,
 			Step:    st.LastError.Step.String(),
 			Message: st.LastError.Message,
 			Detail:  st.LastError.Detail,
@@ -292,6 +294,7 @@ func fromStreamData(d streamData) *stream.Stream {
 	if d.LastError != nil {
 		st.LastError = &stream.LoopError{
 			Kind:    parseErrorKind(d.LastError.Kind),
+			Phase:   d.LastError.Phase,
 			Step:    parseIterStep(d.LastError.Step),
 			Message: d.LastError.Message,
 			Detail:  d.LastError.Detail,

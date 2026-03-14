@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/zmorgan/streams/internal/runtime"
@@ -75,11 +76,11 @@ func (m *mockGit) CommitsBetween(_, _, toSHA string) ([]string, error) {
 // mockPhase is a minimal MacroPhase for testing.
 type mockPhase struct{}
 
-func (p *mockPhase) Name() string                                    { return "test" }
+func (p *mockPhase) Name() string                                   { return "test" }
 func (p *mockPhase) ImplementPrompt(_ PhaseContext) (string, error) { return "implement", nil }
 func (p *mockPhase) ReviewPrompt(_ PhaseContext) (string, error)    { return "review", nil }
-func (p *mockPhase) ImplementTools() []string              { return []string{"Bash"} }
-func (p *mockPhase) ReviewTools() []string                 { return []string{"Bash"} }
+func (p *mockPhase) ImplementTools() []string                       { return []string{"Bash"} }
+func (p *mockPhase) ReviewTools() []string                          { return []string{"Bash"} }
 func (p *mockPhase) IsConverged(r IterationResult) bool {
 	return r.OpenAfterReview <= r.OpenBeforeReview
 }
@@ -154,8 +155,9 @@ func TestRunSnapshotPopulatesFields(t *testing.T) {
 	// maxIterations=1 so it pauses after one iteration regardless of convergence.
 	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 1, mockFactory, nil)
 
-	if len(s.Snapshots) != 1 {
-		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	// Expect 2 snapshots: the iteration snapshot + the MaxIterations error snapshot.
+	if len(s.Snapshots) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", len(s.Snapshots))
 	}
 	snap := s.Snapshots[0]
 	if snap.DiffStat == "" {
@@ -495,5 +497,55 @@ func TestRunSkipsReviewWhenPromptEmpty(t *testing.T) {
 	}
 	if s.Snapshots[0].Review != "" {
 		t.Errorf("expected empty review in snapshot, got %q", s.Snapshots[0].Review)
+	}
+}
+
+func TestRunMaxIterationsIncludesPhaseAndDiagnostic(t *testing.T) {
+	s := newTestStream()
+	s.Pipeline = []string{"coding"}
+	s.PipelineIndex = 0
+
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "impl1"}},
+			{resp: &runtime.Response{Text: "review1"}},
+			{resp: &runtime.Response{Text: "impl2"}},
+			{resp: &runtime.Response{Text: "review2"}},
+		},
+	}
+	// Two iterations where review always files issues (never converges).
+	// Iter 0: idsBefore=[b-1], idsAfterImpl=[], idsAfterReview=[b-2] → not converged
+	// Iter 1: idsBefore=[b-2], idsAfterImpl=[], idsAfterReview=[b-3] → not converged
+	// Then maxIterations=2 triggers.
+	beads := &mockBeads{openIDs: [][]string{
+		ids("b-1"), nil, ids("b-2"),
+		ids("b-2"), nil, ids("b-3"),
+		// ListOpenChildren for diagnostic: still-open beads
+		ids("b-3"),
+	}}
+
+	phase := &mockAutoAdvancePhase{}
+	Run(context.Background(), s, phase, rt, beads, &mockGit{}, 2, mockFactory, nil)
+
+	if s.LastError == nil {
+		t.Fatal("expected MaxIterations error")
+	}
+	if s.LastError.Kind != stream.ErrMaxIterations {
+		t.Errorf("expected ErrMaxIterations, got %s", s.LastError.Kind)
+	}
+	if s.LastError.Phase != "test" {
+		t.Errorf("expected Phase='test', got %q", s.LastError.Phase)
+	}
+	if s.LastError.Detail == "" {
+		t.Error("expected non-empty diagnostic Detail")
+	}
+	// Diagnostic should mention review filing on every iteration.
+	if !strings.Contains(s.LastError.Detail, "never converged") {
+		t.Errorf("expected 'never converged' in detail, got %q", s.LastError.Detail)
+	}
+	// Error snapshot should be recorded.
+	lastSnap := s.Snapshots[len(s.Snapshots)-1]
+	if lastSnap.Error == nil || lastSnap.Error.Kind != stream.ErrMaxIterations {
+		t.Error("expected last snapshot to be the MaxIterations error snapshot")
 	}
 }

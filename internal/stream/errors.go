@@ -36,11 +36,15 @@ func (k ErrorKind) String() string {
 // Lives in the stream package because Stream.LastError references it directly.
 type LoopError struct {
 	Kind    ErrorKind
+	Phase   string // pipeline phase name (e.g. "coding", "plan")
 	Step    IterStep
 	Message string // one-line human summary
 	Detail  string // stderr, conflict file list, etc.
 }
 
 func (e *LoopError) Error() string {
+	if e.Phase != "" {
+		return fmt.Sprintf("%s at %s/%s: %s", e.Kind, e.Phase, e.Step, e.Message)
+	}
 	return fmt.Sprintf("%s at %s: %s", e.Kind, e.Step, e.Message)
 }
