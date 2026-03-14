@@ -1933,6 +1933,10 @@ func (m Model) viewString() string {
 		return renderQuitConfirmOverlay(runningCount, m.width, m.height)
 	}
 
+	if m.showHelp {
+		return renderHelpOverlay(m.helpScroll, m.width, m.height)
+	}
+
 	if m.showRestartPrompt {
 		return renderRestartPromptOverlay(m.width, m.height)
 	}
@@ -2544,6 +2548,68 @@ func renderReviseOverlay(phases []string, cursor, step int, isRunning, replaceSe
 		cap = 100
 	}
 	box := overlayStyle.Width(overlayWidth(width, cap)).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderHelpOverlay(scroll, width, height int) string {
+	// Scopes displayed in the modal, in order.
+	scopes := []Scope{
+		ScopeGlobal,
+		ScopeDashboard,
+		ScopeDetail,
+		ScopeDetailOutput,
+		ScopeBeadBrowse,
+	}
+
+	keyStyle := helpKeyStyle
+	actionStyle := helpActionStyle
+	conditionStyle := helpStyle
+	headerStyle := overlayTitleStyle
+
+	var lines []string
+	for i, scope := range scopes {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, headerStyle.Render(scope.Label()))
+
+		for _, b := range BindingsForScope(scope) {
+			action := b.Action
+			if b.Condition != "" {
+				action += conditionStyle.Render(" ("+b.Condition+")")
+			}
+			line := fmt.Sprintf("  %s  %s",
+				keyStyle.Width(10).Render(b.Key),
+				actionStyle.Render(action))
+			lines = append(lines, line)
+		}
+	}
+
+	// Apply scroll offset and clamp to available height.
+	contentHeight := height - 8 // padding, border, title, footer
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+	maxScroll := len(lines) - contentHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+
+	end := scroll + contentHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	visible := lines[scroll:end]
+
+	overlay := overlayTitleStyle.Render("Keyboard Shortcuts") + "\n\n"
+	overlay += strings.Join(visible, "\n")
+	overlay += "\n\n"
+	overlay += helpStyle.Render("esc or ? to close  j/k to scroll")
+
+	box := overlayStyle.Width(overlayWidth(width, 50)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
