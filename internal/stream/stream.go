@@ -85,6 +85,24 @@ type NotifySettings struct {
 	System bool // macOS system notification via osascript
 }
 
+// ModelConfig holds per-phase model selections.
+type ModelConfig struct {
+	Default  string            `json:"default,omitempty"`    // model for all phases unless overridden
+	PerPhase map[string]string `json:"per_phase,omitempty"` // phase name → model override
+}
+
+// ModelForPhase returns the model to use for a given phase.
+// Resolution: per-phase override → default → "" (CLI default).
+func (mc ModelConfig) ModelForPhase(phase string) string {
+	if m, ok := mc.PerPhase[phase]; ok && m != "" && m != "default" {
+		return m
+	}
+	if mc.Default != "" && mc.Default != "default" {
+		return mc.Default
+	}
+	return "" // empty = don't pass --model, use CLI default
+}
+
 // PendingRevise stores a queued revise request for a running stream.
 // The loop checks this between iterations and applies it if set.
 type PendingRevise struct {
@@ -118,7 +136,9 @@ type Stream struct {
 	Snapshots     []Snapshot
 	Guidance      []Guidance
 	ConvergeASAP  bool           // one-shot flag: skip next review to force convergence
+	PauseRequested bool          // set by UI; loop checks at safe points and pauses gracefully
 	PendingRevise *PendingRevise // queued revise for running streams
+	Models        ModelConfig     // per-phase model selections
 	Notify        NotifySettings // notification preferences for converge/error events
 	EnvironmentPort int            // host port for containerized app server (0 = no environment)
 	OutputLines    []string       // ring buffer of recent CLI output for tail view
@@ -325,6 +345,28 @@ func (s *Stream) DrainConvergeASAP() bool {
 	return v
 }
 
+func (s *Stream) SetPauseRequested(v bool) {
+	s.mu.Lock()
+	s.PauseRequested = v
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetPauseRequested() bool {
+	s.mu.RLock()
+	v := s.PauseRequested
+	s.mu.RUnlock()
+	return v
+}
+
+// DrainPauseRequested atomically reads and clears the PauseRequested flag.
+func (s *Stream) DrainPauseRequested() bool {
+	s.mu.Lock()
+	v := s.PauseRequested
+	s.PauseRequested = false
+	s.mu.Unlock()
+	return v
+}
+
 func (s *Stream) SetPendingRevise(pr *PendingRevise) {
 	s.mu.Lock()
 	s.PendingRevise = pr
@@ -419,4 +461,18 @@ func (s *Stream) GetOutputLines() []string {
 	copy(lines, s.OutputLines)
 	s.mu.RUnlock()
 	return lines
+}
+
+func (s *Stream) SetModels(mc ModelConfig) {
+	s.mu.Lock()
+	s.Models = mc
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetModels() ModelConfig {
+	s.mu.RLock()
+	mc := s.Models
+	s.mu.RUnlock()
+	return mc
 }

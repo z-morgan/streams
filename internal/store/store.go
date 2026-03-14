@@ -37,6 +37,7 @@ type streamData struct {
 	WorkTree      string    `json:"worktree"`
 	EnvironmentPort int           `json:"environment_port,omitempty"`
 	SessionID     string          `json:"session_id,omitempty"`
+	Models        *modelConfigData `json:"models,omitempty"`
 	Notify        *notifyData     `json:"notify,omitempty"`
 	LastError     *errData        `json:"last_error,omitempty"`
 	PendingRevise *pendingReviseData `json:"pending_revise,omitempty"`
@@ -53,6 +54,11 @@ type pendingReviseData struct {
 type guidanceData struct {
 	Text      string    `json:"text"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type modelConfigData struct {
+	Default  string            `json:"default,omitempty"`
+	PerPhase map[string]string `json:"per_phase,omitempty"`
 }
 
 type notifyData struct {
@@ -215,6 +221,10 @@ func toStreamData(st *stream.Stream) streamData {
 		CreatedAt:     st.CreatedAt,
 		UpdatedAt:     st.UpdatedAt,
 	}
+	mc := st.GetModels()
+	if mc.Default != "" || len(mc.PerPhase) > 0 {
+		d.Models = &modelConfigData{Default: mc.Default, PerPhase: mc.PerPhase}
+	}
 	n := st.GetNotify()
 	if n.Bell || n.Flash || n.System {
 		d.Notify = &notifyData{Bell: n.Bell, Flash: n.Flash, System: n.System}
@@ -284,6 +294,12 @@ func fromStreamData(d streamData) *stream.Stream {
 		st.PendingRevise = &stream.PendingRevise{
 			TargetPhaseIndex: d.PendingRevise.TargetPhaseIndex,
 			Feedback:         d.PendingRevise.Feedback,
+		}
+	}
+	if d.Models != nil {
+		st.Models = stream.ModelConfig{
+			Default:  d.Models.Default,
+			PerPhase: d.Models.PerPhase,
 		}
 	}
 	if d.Notify != nil {

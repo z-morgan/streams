@@ -241,6 +241,9 @@ func appendCommonArgs(args []string, req runtime.Request) []string {
 	if req.SessionID != "" {
 		args = append(args, "--session-id", req.SessionID)
 	}
+	if v, ok := req.Options["model"]; ok && v != "" {
+		args = append(args, "--model", v)
+	}
 	if v, ok := req.Options["allowedTools"]; ok {
 		args = append(args, "--allowedTools", v)
 	}

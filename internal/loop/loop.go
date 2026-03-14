@@ -74,7 +74,13 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	startIteration := s.GetIteration()
 
 	for {
-		// Check for cancellation at top of loop.
+		// Check for graceful pause request before starting a new iteration.
+		if s.DrainPauseRequested() {
+			s.SetStatus(stream.StatusPaused)
+			return
+		}
+
+		// Check for hard cancellation at top of loop.
 		if ctx.Err() != nil {
 			s.SetStatus(stream.StatusStopped)
 			return
@@ -135,7 +141,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			implPrompt = appendGuidanceSection(implPrompt, pendingGuidance)
 		}
 
-		implReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort())
+		phaseModel := s.GetModels().ModelForPhase(phase.Name())
+		implReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort(), phaseModel)
 		implReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		implResp, err := rt.Run(ctx, implReq)
 		if err != nil {
@@ -185,6 +192,29 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			slog.Warn("autosquash failed, continuing to review", "stream", s.ID, "err", err)
 		}
 
+		// Check for graceful pause between implement and review.
+		if s.DrainPauseRequested() {
+			diffStat, _ := git.DiffStat(s.WorkTree, headBefore)
+			commitSHAs, _ := git.CommitsBetween(s.WorkTree, headBefore, headAfterImpl)
+			snap := stream.Snapshot{
+				Phase:       phase.Name(),
+				Iteration:   iteration,
+				Summary:     implResp.Text,
+				CostUSD:     implResp.CostUSD,
+				DiffStat:    diffStat,
+				CommitSHAs:  commitSHAs,
+				BeadsClosed: beadsClosed,
+				Timestamp:   time.Now(),
+			}
+			s.AppendSnapshot(snap)
+			if onCheckpoint != nil {
+				onCheckpoint(s)
+			}
+			s.SetIteration(iteration + 1)
+			s.SetStatus(stream.StatusPaused)
+			return
+		}
+
 		// --- StepReview ---
 		s.SetIterStep(stream.StepReview)
 
@@ -209,7 +239,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
 				reviewResp = &runtime.Response{}
 			} else {
-				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort())
+				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort(), phaseModel)
 				reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
 				reviewResp, err = rt.Run(ctx, reviewReq)
 				if err != nil {
@@ -362,7 +392,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	}
 }
 
-func buildRequest(prompt string, tools []string, envPort int) runtime.Request {
+func buildRequest(prompt string, tools []string, envPort int, model ...string) runtime.Request {
 	systemPrompt := orchestratorRules
 	if envPort > 0 {
 		systemPrompt += fmt.Sprintf(`
@@ -373,13 +403,17 @@ A live application server is running at http://localhost:%d.
 Use the chrome-devtools MCP tool to open pages, inspect elements, and verify your UI changes in the browser.
 After making code changes, the server will automatically reload — just refresh the page.`, envPort)
 	}
+	opts := map[string]string{
+		"allowedTools":       strings.Join(tools, ","),
+		"appendSystemPrompt": systemPrompt,
+		"permissionMode":     "dontAsk",
+	}
+	if len(model) > 0 && model[0] != "" {
+		opts["model"] = model[0]
+	}
 	return runtime.Request{
-		Prompt: prompt,
-		Options: map[string]string{
-			"allowedTools":       strings.Join(tools, ","),
-			"appendSystemPrompt": systemPrompt,
-			"permissionMode":     "dontAsk",
-		},
+		Prompt:  prompt,
+		Options: opts,
 	}
 }
 
@@ -433,6 +467,12 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 	var firstErr *stream.LoopError
 
 	for i, slot := range slots {
+		// Check for graceful pause between slots.
+		if s.DrainPauseRequested() {
+			s.SetStatus(stream.StatusPaused)
+			return
+		}
+
 		if ctx.Err() != nil {
 			s.SetStatus(stream.StatusStopped)
 			return
@@ -476,7 +516,8 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 			continue
 		}
 
-		req := buildRequest(prompt, slot.Tools, s.GetEnvironmentPort())
+		slotModel := s.GetModels().ModelForPhase(phase.Name())
+		req := buildRequest(prompt, slot.Tools, s.GetEnvironmentPort(), slotModel)
 		req.OnOutput = func(line string) { s.AppendOutput(line) }
 		resp, err := rt.Run(ctx, req)
 		if err != nil {
