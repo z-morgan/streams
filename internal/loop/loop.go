@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,9 +36,12 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	s.SetStatus(stream.StatusRunning)
 	s.ClearOutput()
 
+	// Derive MCP tool patterns from the stream's MCP config file.
+	mcpConfigPath, mcpToolPatterns := loadMCPToolPatterns(s.GetMCPConfigPath())
+
 	// Slotted phases (e.g. polish) bypass the normal implement→review cycle.
 	if slotted, ok := phase.(SlottedPhase); ok {
-		runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs)
+		runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs, mcpConfigPath, mcpToolPatterns)
 		return
 	}
 
@@ -60,7 +64,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 			// If the next phase is slotted, run its slots and return.
 			if slotted, ok := nextPhase.(SlottedPhase); ok {
-				runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs)
+				runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs, mcpConfigPath, mcpToolPatterns)
 				return
 			}
 		} else {
@@ -115,6 +119,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			Iteration:          iteration,
 			OrderedSteps:       FormatSteps(steps),
 			PromptOverrideDirs: promptOverrideDirs,
+			MCPConfigPath:      mcpConfigPath,
+			MCPToolPatterns:    mcpToolPatterns,
 		}
 
 		// --- StepImplement ---
@@ -142,7 +148,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 
 		phaseModel := s.GetModels().ModelForPhase(phase.Name())
-		implReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort(), phaseModel)
+		implReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort(), phaseModel, mcpConfigPath, mcpToolPatterns)
 		implReq.OnOutput = func(line string) { s.AppendOutput(line) }
 		implResp, err := rt.Run(ctx, implReq)
 		if err != nil {
@@ -239,7 +245,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
 				reviewResp = &runtime.Response{}
 			} else {
-				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort(), phaseModel)
+				reviewReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort(), phaseModel, mcpConfigPath, mcpToolPatterns)
 				reviewReq.OnOutput = func(line string) { s.AppendOutput(line) }
 				reviewResp, err = rt.Run(ctx, reviewReq)
 				if err != nil {
@@ -348,7 +354,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				// If the next phase is slotted (e.g. polish), run its slots
 				// and return instead of continuing the normal iteration loop.
 				if slotted, ok := nextPhase.(SlottedPhase); ok {
-					runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs)
+					runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs, mcpConfigPath, mcpToolPatterns)
 					return
 				}
 				continue
@@ -392,9 +398,18 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 	}
 }
 
-func buildRequest(prompt string, tools []string, envPort int, model ...string) runtime.Request {
+func buildRequest(prompt string, tools []string, envPort int, model string, mcpConfigPath string, mcpToolPatterns []string) runtime.Request {
 	systemPrompt := orchestratorRules
-	if envPort > 0 {
+
+	hasBrowserMCP := false
+	for _, p := range mcpToolPatterns {
+		if strings.Contains(p, "chrome-devtools") || strings.Contains(p, "playwright") {
+			hasBrowserMCP = true
+			break
+		}
+	}
+
+	if envPort > 0 && hasBrowserMCP {
 		systemPrompt += fmt.Sprintf(`
 
 ## Application Server
@@ -402,14 +417,32 @@ func buildRequest(prompt string, tools []string, envPort int, model ...string) r
 A live application server is running at http://localhost:%d.
 Use the chrome-devtools MCP tool to open pages, inspect elements, and verify your UI changes in the browser.
 After making code changes, the server will automatically reload — just refresh the page.`, envPort)
+	} else if envPort > 0 {
+		systemPrompt += fmt.Sprintf(`
+
+## Application Server
+
+A live application server is running at http://localhost:%d.
+After making code changes, the server will automatically reload.`, envPort)
+	} else if hasBrowserMCP {
+		systemPrompt += `
+
+## Browser Tools
+
+Use the chrome-devtools MCP tool to open pages, inspect elements, and verify your UI changes in the browser.`
 	}
+
+	allTools := append(tools, mcpToolPatterns...)
 	opts := map[string]string{
-		"allowedTools":       strings.Join(tools, ","),
+		"allowedTools":       strings.Join(allTools, ","),
 		"appendSystemPrompt": systemPrompt,
 		"permissionMode":     "dontAsk",
 	}
-	if len(model) > 0 && model[0] != "" {
-		opts["model"] = model[0]
+	if model != "" {
+		opts["model"] = model
+	}
+	if mcpConfigPath != "" {
+		opts["mcpConfig"] = mcpConfigPath
 	}
 	return runtime.Request{
 		Prompt:  prompt,
@@ -462,7 +495,7 @@ func setDiff(a, b []string) []string {
 
 // runSlots drives a SlottedPhase by iterating over its slots serially.
 // Each slot gets its own prompt, agent invocation, and snapshot.
-func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runtime.Runtime, git GitQuerier, onCheckpoint func(*stream.Stream), promptOverrideDirs []string) {
+func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runtime.Runtime, git GitQuerier, onCheckpoint func(*stream.Stream), promptOverrideDirs []string, mcpConfigPath string, mcpToolPatterns []string) {
 	slots := phase.Slots()
 	var firstErr *stream.LoopError
 
@@ -487,6 +520,8 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 			WorkDir:            s.WorkTree,
 			Iteration:          i,
 			PromptOverrideDirs: promptOverrideDirs,
+			MCPConfigPath:      mcpConfigPath,
+			MCPToolPatterns:    mcpToolPatterns,
 		}
 
 		headBefore, _ := git.HeadSHA(s.WorkTree)
@@ -517,7 +552,7 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 		}
 
 		slotModel := s.GetModels().ModelForPhase(phase.Name())
-		req := buildRequest(prompt, slot.Tools, s.GetEnvironmentPort(), slotModel)
+		req := buildRequest(prompt, slot.Tools, s.GetEnvironmentPort(), slotModel, mcpConfigPath, mcpToolPatterns)
 		req.OnOutput = func(line string) { s.AppendOutput(line) }
 		resp, err := rt.Run(ctx, req)
 		if err != nil {
@@ -601,4 +636,37 @@ func appendGuidanceSection(prompt string, guidance []stream.Guidance) string {
 	}
 	b.WriteString("\nPrioritize addressing this guidance alongside your normal work items.")
 	return b.String()
+}
+
+// loadMCPToolPatterns reads an MCP config file and returns the path and
+// derived tool patterns. Returns empty values if the path is empty or
+// the file cannot be read.
+func loadMCPToolPatterns(path string) (string, []string) {
+	if path == "" {
+		return "", nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		slog.Warn("failed to read MCP config, continuing without MCP", "path", path, "err", err)
+		return "", nil
+	}
+
+	var f struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &f); err != nil {
+		slog.Warn("failed to parse MCP config, continuing without MCP", "path", path, "err", err)
+		return "", nil
+	}
+
+	if len(f.MCPServers) == 0 {
+		return "", nil
+	}
+
+	patterns := make([]string, 0, len(f.MCPServers))
+	for name := range f.MCPServers {
+		patterns = append(patterns, "mcp__"+name+"__*")
+	}
+	return path, patterns
 }

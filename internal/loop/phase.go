@@ -35,6 +35,8 @@ type PhaseContext struct {
 	Iteration          int
 	OrderedSteps       string   // formatted step list injected into implement prompt
 	PromptOverrideDirs []string // per-stream and project prompt override directories
+	MCPConfigPath      string   // absolute path to mcp.json (empty = no MCP)
+	MCPToolPatterns    []string // e.g. ["mcp__chrome-devtools__*"]
 }
 
 // IterationResult captures the outcome of a single iteration for convergence detection.

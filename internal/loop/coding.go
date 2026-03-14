@@ -75,6 +75,23 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		rebaseOutput := string(out)
+
+		// A fixup! commit that fully reverts its target produces an empty-commit
+		// error, not a merge conflict. The rebase agent can't handle this and
+		// will destructively drop all commits. Abort early instead.
+		if strings.Contains(rebaseOutput, "would make it empty") ||
+			strings.Contains(rebaseOutput, "would make\nit empty") {
+			abort := exec.Command("git", "rebase", "--abort")
+			abort.Dir = ctx.WorkDir
+			_ = abort.Run()
+			if dirty {
+				pop := exec.Command("git", "stash", "pop")
+				pop.Dir = ctx.WorkDir
+				_ = pop.Run()
+			}
+			return fmt.Errorf("autosquash produced empty commit (fixup fully reverted its target)")
+		}
+
 		slog.Info("autosquash failed, attempting agent resolution", "stream", ctx.Stream.ID)
 
 		// Try agent-based conflict resolution before aborting.
@@ -82,6 +99,13 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 		if agentErr == nil {
 			// Agent resolved conflicts — check that rebase actually completed.
 			if !isRebaseInProgress(ctx.WorkDir) {
+				// Verify the agent didn't drop all commits (HEAD should be ahead of baseSHA).
+				postHead := exec.Command("git", "rev-parse", "HEAD")
+				postHead.Dir = ctx.WorkDir
+				postOut, postErr := postHead.Output()
+				if postErr != nil || strings.TrimSpace(string(postOut)) == ctx.Stream.BaseSHA {
+					return fmt.Errorf("rebase agent dropped all commits — HEAD is at baseSHA")
+				}
 				if dirty {
 					pop := exec.Command("git", "stash", "pop")
 					pop.Dir = ctx.WorkDir
@@ -134,7 +158,7 @@ func (p *CodingPhase) runRebaseAgent(ctx context.Context, pctx PhaseContext, reb
 
 	rt := &runtime.BudgetRuntime{Inner: pctx.Runtime, MaxBudget: "0.50"}
 
-	req := buildRequest(prompt, p.ImplementTools(), pctx.Stream.GetEnvironmentPort())
+	req := buildRequest(prompt, p.ImplementTools(), pctx.Stream.GetEnvironmentPort(), "", "", nil)
 	req.OnOutput = func(line string) { pctx.Stream.AppendOutput(line) }
 
 	_, err = rt.Run(ctx, req)

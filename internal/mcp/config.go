@@ -56,3 +56,34 @@ func LoadConfig(projectDir string) (*Config, error) {
 		ToolPatterns: patterns,
 	}, nil
 }
+
+// LoadFromPath reads an MCP config from an absolute file path.
+// Returns nil if the file does not exist.
+func LoadFromPath(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read mcp config: %w", err)
+	}
+
+	var f mcpFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parse mcp config: %w", err)
+	}
+
+	if len(f.MCPServers) == 0 {
+		return nil, fmt.Errorf("mcp config: mcpServers must contain at least one server")
+	}
+
+	patterns := make([]string, 0, len(f.MCPServers))
+	for name := range f.MCPServers {
+		patterns = append(patterns, "mcp__"+name+"__*")
+	}
+
+	return &Config{
+		Path:         path,
+		ToolPatterns: patterns,
+	}, nil
+}
