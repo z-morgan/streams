@@ -85,9 +85,15 @@ type NotifySettings struct {
 	System bool // macOS system notification via osascript
 }
 
+// FallbackConfig controls automatic fallback to a local model on rate limits.
+type FallbackConfig struct {
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model"` // e.g. "ollama:llama3.2"
+}
+
 // ModelConfig holds per-phase model selections.
 type ModelConfig struct {
-	Default  string            `json:"default,omitempty"`    // model for all phases unless overridden
+	Default  string            `json:"default,omitempty"`   // model for all phases unless overridden
 	PerPhase map[string]string `json:"per_phase,omitempty"` // phase name → model override
 }
 
@@ -115,38 +121,39 @@ const maxOutputLines = 200
 // Stream is the central state model for a running autonomous code generation loop.
 // Thread-safe via sync.RWMutex — the TUI reads state while the loop goroutine writes.
 type Stream struct {
-	mu            sync.RWMutex
-	ID            string
-	Name          string
-	Task          string
-	Mode          Mode
-	Status        Status
-	Pipeline      []string // ordered macro-phase names, e.g. ["plan","decompose","coding"]
-	PipelineIndex int      // which macro-phase is active
-	Breakpoints   []int    // pipeline indices where the stream pauses after convergence
-	IterStep      IterStep
-	Iteration     int // iteration count within current macro-phase
-	Converged     bool
-	BeadsParentID string
-	BaseSHA       string // commit the stream branched from; rebase target
-	Branch        string // e.g. "streams/<stream-id>"
-	WorkTree      string // absolute path to git worktree
-	SessionID     string // most recent Claude session ID; used for --resume attach
-	LastError     *LoopError
-	Snapshots     []Snapshot
-	Guidance      []Guidance
-	ConvergeASAP  bool           // one-shot flag: skip next review to force convergence
-	PauseRequested bool          // set by UI; loop checks at safe points and pauses gracefully
-	PendingRevise *PendingRevise // queued revise for running streams
-	Models        ModelConfig     // per-phase model selections
-	Notify        NotifySettings // notification preferences for converge/error events
+	mu              sync.RWMutex
+	ID              string
+	Name            string
+	Task            string
+	Mode            Mode
+	Status          Status
+	Pipeline        []string // ordered macro-phase names, e.g. ["plan","decompose","coding"]
+	PipelineIndex   int      // which macro-phase is active
+	Breakpoints     []int    // pipeline indices where the stream pauses after convergence
+	IterStep        IterStep
+	Iteration       int // iteration count within current macro-phase
+	Converged       bool
+	BeadsParentID   string
+	BaseSHA         string // commit the stream branched from; rebase target
+	Branch          string // e.g. "streams/<stream-id>"
+	WorkTree        string // absolute path to git worktree
+	SessionID       string // most recent Claude session ID; used for --resume attach
+	LastError       *LoopError
+	Snapshots       []Snapshot
+	Guidance        []Guidance
+	ConvergeASAP    bool           // one-shot flag: skip next review to force convergence
+	PauseRequested  bool           // set by UI; loop checks at safe points and pauses gracefully
+	PendingRevise   *PendingRevise // queued revise for running streams
+	Models          ModelConfig    // per-phase model selections
+	Fallback        FallbackConfig // rate limit fallback configuration
+	Notify          NotifySettings // notification preferences for converge/error events
 	MCPConfigPath   string         // absolute path to .streams/mcp.json (empty = no MCP)
 	EnvironmentPort int            // host port for containerized app server (0 = no environment)
-	OutputLines    []string       // ring buffer of recent CLI output for tail view
-	reviseFrom     string         // transient: phase name we revised FROM (consumed by next snapshot)
-	reviseFeedback string         // transient: user feedback that triggered the revision
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	OutputLines     []string       // ring buffer of recent CLI output for tail view
+	reviseFrom      string         // transient: phase name we revised FROM (consumed by next snapshot)
+	reviseFeedback  string         // transient: user feedback that triggered the revision
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (s *Stream) SetStatus(status Status) {
@@ -490,4 +497,18 @@ func (s *Stream) GetModels() ModelConfig {
 	mc := s.Models
 	s.mu.RUnlock()
 	return mc
+}
+
+func (s *Stream) SetFallback(fc FallbackConfig) {
+	s.mu.Lock()
+	s.Fallback = fc
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetFallback() FallbackConfig {
+	s.mu.RLock()
+	fc := s.Fallback
+	s.mu.RUnlock()
+	return fc
 }
