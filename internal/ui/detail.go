@@ -45,9 +45,9 @@ type iterationRow struct {
 	IsBreakpoint       bool
 	HasError           bool
 	IsInitialPrompt    bool
-	IsRevision         bool   // first iteration after a revision
-	IsPendingRevise    bool   // informational row: a revise is queued
-	PendingRevisePhase string // target phase name for the pending revise
+	IsRevision         bool            // first iteration after a revision
+	IsPendingRevise    bool            // informational row: a revise is queued
+	PendingRevisePhase string          // target phase name for the pending revise
 	Step               stream.IterStep // current step (only meaningful for in-progress rows)
 	SnapshotIndex      int             // -1 for non-snapshot rows
 }
@@ -560,6 +560,12 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFo
 		for _, g := range snap.GuidanceConsumed {
 			b.WriteString(fmt.Sprintf("  - %s\n", g.Text))
 		}
+	}
+
+	if snap.UsedFallback {
+		b.WriteString("\n" + hr + "\n")
+		fallbackIcon := lipgloss.NewStyle().Foreground(colorWarning).Render("⚡")
+		b.WriteString(fallbackIcon + " " + labelStyle.Render("Used fallback: ") + snap.FallbackModel + "\n")
 	}
 
 	if snap.Error != nil {
