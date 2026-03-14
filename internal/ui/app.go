@@ -172,6 +172,10 @@ type Model struct {
 	editFallback         stream.FallbackConfig // fallback editing state
 	editFBCursor         int                   // cursor into ollama models for fallback
 
+	// Help modal overlay state.
+	showHelp   bool
+	helpScroll int
+
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
 
@@ -342,6 +346,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle quit confirmation overlay if active.
 	if m.showQuitConfirm {
 		return m.updateQuitConfirm(msg)
+	}
+
+	// Handle help modal overlay if active.
+	if m.showHelp {
+		return m.updateHelp(msg)
+	}
+
+	// Open help on ? keypress (before other overlays so it's always reachable).
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "?" {
+		m.showHelp = true
+		m.helpScroll = 0
+		return m, nil
 	}
 
 	// Handle restart prompt overlay if active.
@@ -1674,6 +1690,32 @@ func (m Model) updateForceAdvance(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			m.showForceAdvance = false
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc", "?":
+			m.showHelp = false
+			return m, nil
+		case "j", "down":
+			m.helpScroll++
+			return m, nil
+		case "k", "up":
+			if m.helpScroll > 0 {
+				m.helpScroll--
+			}
+			return m, nil
+		case "G":
+			m.helpScroll = len(Bindings) // clamped during render
+			return m, nil
+		case "g":
+			m.helpScroll = 0
 			return m, nil
 		}
 	}
