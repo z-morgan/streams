@@ -52,6 +52,7 @@ func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Re
 		cmd.Dir = r.WorkDir
 	}
 	cmd.Env = appendEnvWithout(cmd.Environ(), "CLAUDECODE")
+	cmd.Env = appendOllamaEnv(cmd.Env, req)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -100,6 +101,7 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 		cmd.Dir = r.WorkDir
 	}
 	cmd.Env = appendEnvWithout(cmd.Environ(), "CLAUDECODE")
+	cmd.Env = appendOllamaEnv(cmd.Env, req)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -242,7 +244,11 @@ func appendCommonArgs(args []string, req runtime.Request) []string {
 		args = append(args, "--session-id", req.SessionID)
 	}
 	if v, ok := req.Options["model"]; ok && v != "" {
-		args = append(args, "--model", v)
+		if strings.HasPrefix(v, "ollama:") {
+			args = append(args, "--model", strings.TrimPrefix(v, "ollama:"))
+		} else {
+			args = append(args, "--model", v)
+		}
 	}
 	if v, ok := req.Options["allowedTools"]; ok {
 		args = append(args, "--allowedTools", v)
@@ -301,6 +307,16 @@ func formatToolUse(name string, input json.RawMessage) string {
 	}
 
 	return "> " + name
+}
+
+// appendOllamaEnv sets ANTHROPIC_BASE_URL to route requests to the local Ollama
+// server when the model has an ollama: prefix. Returns the env unchanged otherwise.
+func appendOllamaEnv(env []string, req runtime.Request) []string {
+	model := req.Options["model"]
+	if !strings.HasPrefix(model, "ollama:") {
+		return env
+	}
+	return append(env, "ANTHROPIC_BASE_URL=http://localhost:11434")
 }
 
 // appendEnvWithout returns os environ with the named variable removed, plus
