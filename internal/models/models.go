@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zmorgan/streams/internal/ollama"
 )
 
 // Aliases are always available, regardless of API key.
@@ -20,12 +22,14 @@ type ModelEntry struct {
 	Family string // e.g. "claude-sonnet-4", derived from the model ID
 }
 
-// Fetcher asynchronously fetches available models from the Anthropic API.
+// Fetcher asynchronously fetches available models from the Anthropic API and Ollama.
 type Fetcher struct {
-	mu        sync.RWMutex
-	models    []ModelEntry
-	fetched   bool
-	fetchErr  error
+	mu            sync.RWMutex
+	models        []ModelEntry
+	fetched       bool
+	fetchErr      error
+	ollamaModels  []ollama.Model
+	ollamaFetched bool
 }
 
 // FetchAsync starts a background goroutine to fetch models from the API.
@@ -51,6 +55,18 @@ func (f *Fetcher) FetchAsync() {
 			slog.Debug("model discovery complete", "count", len(models))
 		}
 	}()
+
+	go func() {
+		ollamaModels, err := ollama.ListModels()
+		f.mu.Lock()
+		if err == nil {
+			f.ollamaModels = ollamaModels
+		} else {
+			slog.Debug("ollama model discovery failed", "err", err)
+		}
+		f.ollamaFetched = true
+		f.mu.Unlock()
+	}()
 }
 
 // Models returns the list of discovered API models.
@@ -61,7 +77,7 @@ func (f *Fetcher) Models() []ModelEntry {
 	return f.models
 }
 
-// AllOptions returns the full ordered list: aliases first, then API-discovered models.
+// AllOptions returns the full ordered list: aliases, then API models, then Ollama models.
 func (f *Fetcher) AllOptions() []string {
 	result := make([]string, len(Aliases))
 	copy(result, Aliases)
@@ -70,7 +86,32 @@ func (f *Fetcher) AllOptions() []string {
 	for _, m := range apiModels {
 		result = append(result, m.ID)
 	}
+
+	for _, m := range f.OllamaOptions() {
+		result = append(result, m)
+	}
 	return result
+}
+
+// OllamaOptions returns Ollama model names with the "ollama:" prefix.
+func (f *Fetcher) OllamaOptions() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var result []string
+	for _, m := range f.ollamaModels {
+		result = append(result, "ollama:"+m.Name)
+	}
+	return result
+}
+
+// IsOllamaModel returns true if the model name has the "ollama:" prefix.
+func IsOllamaModel(name string) bool {
+	return strings.HasPrefix(name, "ollama:")
+}
+
+// OllamaRunning checks if the Ollama server is reachable.
+func (f *Fetcher) OllamaRunning() bool {
+	return ollama.IsRunning()
 }
 
 // apiResponse matches the Anthropic /v1/models response shape.
