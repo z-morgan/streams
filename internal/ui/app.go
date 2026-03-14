@@ -1170,6 +1170,7 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 	modelOptions := m.modelFetcher.AllOptions()
+	pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -1178,26 +1179,80 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.newStreamStep = 2
 			return m, nil
 
+		case "tab":
+			m.newStreamPerPhase = !m.newStreamPerPhase
+			if m.newStreamPerPhase {
+				// Initialize per-phase map from current default.
+				if m.newStreamModels.PerPhase == nil {
+					m.newStreamModels.PerPhase = make(map[string]string)
+				}
+				m.newStreamPhaseModelCursor = 0
+			}
+			return m, nil
+
 		case "j", "down":
-			if m.newStreamModelCursor < len(modelOptions)-1 {
-				m.newStreamModelCursor++
+			if m.newStreamPerPhase {
+				if m.newStreamPhaseModelCursor < len(pipeline)-1 {
+					m.newStreamPhaseModelCursor++
+				}
+			} else {
+				if m.newStreamModelCursor < len(modelOptions)-1 {
+					m.newStreamModelCursor++
+				}
 			}
 			return m, nil
 
 		case "k", "up":
-			if m.newStreamModelCursor > 0 {
-				m.newStreamModelCursor--
+			if m.newStreamPerPhase {
+				if m.newStreamPhaseModelCursor > 0 {
+					m.newStreamPhaseModelCursor--
+				}
+			} else {
+				if m.newStreamModelCursor > 0 {
+					m.newStreamModelCursor--
+				}
 			}
 			return m, nil
 
 		case "space":
-			if m.newStreamModelCursor >= 0 && m.newStreamModelCursor < len(modelOptions) {
-				m.newStreamModels.Default = modelOptions[m.newStreamModelCursor]
+			if !m.newStreamPerPhase {
+				if m.newStreamModelCursor >= 0 && m.newStreamModelCursor < len(modelOptions) {
+					m.newStreamModels.Default = modelOptions[m.newStreamModelCursor]
+				}
+			}
+			return m, nil
+
+		case "h", "left":
+			if m.newStreamPerPhase && len(pipeline) > 0 {
+				phaseName := pipeline[m.newStreamPhaseModelCursor]
+				current := m.newStreamModels.PerPhase[phaseName]
+				idx := modelOptionIndex(modelOptions, current)
+				idx--
+				if idx < 0 {
+					idx = len(modelOptions) - 1
+				}
+				m.newStreamModels.PerPhase[phaseName] = modelOptions[idx]
+			}
+			return m, nil
+
+		case "l", "right":
+			if m.newStreamPerPhase && len(pipeline) > 0 {
+				phaseName := pipeline[m.newStreamPhaseModelCursor]
+				current := m.newStreamModels.PerPhase[phaseName]
+				idx := modelOptionIndex(modelOptions, current)
+				idx++
+				if idx >= len(modelOptions) {
+					idx = 0
+				}
+				m.newStreamModels.PerPhase[phaseName] = modelOptions[idx]
 			}
 			return m, nil
 
 		case "enter":
-			pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
+			if m.newStreamPerPhase {
+				// Clear default when using per-phase config.
+				m.newStreamModels.Default = ""
+			}
 			if len(pipeline) > 1 {
 				m.newStreamStep = 4
 				m.newStreamBreakpoints = make(map[int]bool)
@@ -1209,6 +1264,16 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// modelOptionIndex returns the index of value in options, or 0 if not found.
+func modelOptionIndex(options []string, value string) int {
+	for i, opt := range options {
+		if opt == value {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1689,7 +1754,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.modelFetcher.AllOptions(), m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.AllOptions(), m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -1802,7 +1867,7 @@ func (m Model) viewString() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, modelOptions []string, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelOptions []string, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
 	var overlay string
 
 	totalSteps := 4
@@ -1828,32 +1893,59 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
-		overlay += "Select Model:\n\n"
-		selected := modelConfig.Default
-		if selected == "" {
-			selected = "default"
+		if perPhase {
+			overlay += "Select Models per Phase:\n\n"
+			selectedPipe := selectedPipeline(checked, phaseTree)
+			for i, phaseName := range selectedPipe {
+				cursor := "  "
+				if i == phaseModelCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				phaseModel := modelConfig.PerPhase[phaseName]
+				if phaseModel == "" {
+					phaseModel = "default"
+				}
+				label := fmt.Sprintf("%-12s %s", phaseName, phaseModel)
+				if i == phaseModelCursor {
+					label = selectedRowStyle.Render(label)
+				}
+				overlay += cursor + label + "\n"
+			}
+			overlay += "\n"
+			perPhaseCheck := "[x]"
+			overlay += "  " + perPhaseCheck + " Configure per phase\n"
+			overlay += "\n" + helpStyle.Render("j/k: navigate phase  h/l: cycle model  tab: all-phases  enter: confirm  esc: back")
+		} else {
+			overlay += "Select Model:\n\n"
+			selected := modelConfig.Default
+			if selected == "" {
+				selected = "default"
+			}
+			for i, opt := range modelOptions {
+				cursor := "  "
+				if i == modelCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				radio := "○"
+				if opt == selected {
+					radio = "●"
+				}
+				label := opt
+				if opt == "default" {
+					label += " (CLI default)"
+				}
+				if i == modelCursor {
+					label = selectedRowStyle.Render(radio + " " + label)
+				} else {
+					label = radio + " " + label
+				}
+				overlay += cursor + label + "\n"
+			}
+			overlay += "\n"
+			perPhaseCheck := "[ ]"
+			overlay += "  " + perPhaseCheck + " Configure per phase\n"
+			overlay += "\n" + helpStyle.Render("j/k: navigate  space: select  tab: per-phase  enter: next  esc: back")
 		}
-		for i, opt := range modelOptions {
-			cursor := "  "
-			if i == modelCursor {
-				cursor = cursorStyle.Render("> ")
-			}
-			radio := "○"
-			if opt == selected {
-				radio = "●"
-			}
-			label := opt
-			if opt == "default" {
-				label += " (CLI default)"
-			}
-			if i == modelCursor {
-				label = selectedRowStyle.Render(radio + " " + label)
-			} else {
-				label = radio + " " + label
-			}
-			overlay += cursor + label + "\n"
-		}
-		overlay += "\n" + helpStyle.Render("j/k: navigate  space: select  enter: next  esc: back")
 	case 4:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
