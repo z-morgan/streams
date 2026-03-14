@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/zmorgan/streams/internal/models"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -109,9 +110,10 @@ const (
 
 // Model is the root Bubble Tea model for the streams TUI.
 type Model struct {
-	orch      *orchestrator.Orchestrator
-	width     int
-	height    int
+	orch         *orchestrator.Orchestrator
+	modelFetcher *models.Fetcher
+	width        int
+	height       int
 	view      view
 	dashboard dashboardView
 	detail    detailView
@@ -134,6 +136,9 @@ type Model struct {
 	newStreamBPCursor    int                   // cursor into breakpoint gaps
 	newStreamNotify      stream.NotifySettings // notification toggles
 	creating             bool                  // true while orch.Create is running
+
+	// Quit confirmation overlay state.
+	showQuitConfirm bool
 
 	// Delete confirmation overlay state.
 	showDeleteConfirm bool
@@ -257,6 +262,7 @@ func New(orch *orchestrator.Orchestrator) Model {
 
 	return Model{
 		orch:           orch,
+		modelFetcher:   &models.Fetcher{},
 		view:           viewDashboard,
 		guidanceInput:  ti,
 		newStreamTitle: titleInput,
@@ -274,6 +280,9 @@ func (s *EventSink) Send(event orchestrator.Event) {
 }
 
 func (m Model) Init() tea.Cmd {
+	// Fetch available models from the Anthropic API in the background.
+	m.modelFetcher.FetchAsync()
+
 	// Auto-resume streams that were running or created when the app last exited.
 	for _, st := range m.orch.List() {
 		status := st.GetStatus()
@@ -315,6 +324,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyPressMsg); ok {
 		m.errorMsg = ""
 		m.statusMsg = ""
+	}
+
+	// Handle quit confirmation overlay if active.
+	if m.showQuitConfirm {
+		return m.updateQuitConfirm(msg)
 	}
 
 	// Handle restart prompt overlay if active.
@@ -374,6 +388,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDashboard(msg)
 		case viewDetail:
 			return m.updateDetail(msg)
+		}
+
+	case tea.MouseWheelMsg:
+		if m.view == viewDetail && m.detail.focusRight {
+			return m.handleDetailScroll(msg), nil
 		}
 
 	case beadsInitDoneMsg:
@@ -484,7 +503,8 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q", "ctrl+c":
-		return m, tea.Quit
+		m.showQuitConfirm = true
+		return m, nil
 
 	case "j", "down":
 		if m.dashboard.mode == modeList {
@@ -542,6 +562,14 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		if st := m.selectedStream(); st != nil {
 			m.orch.Stop(st.ID)
+			return m.setStatus("Pausing after current step completes…")
+		} else {
+			return m.setStatus("No stream selected.")
+		}
+
+	case "X":
+		if st := m.selectedStream(); st != nil {
+			m.orch.Kill(st.ID)
 		} else {
 			return m.setStatus("No stream selected.")
 		}
@@ -634,7 +662,7 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.detail.clampCursor(len(rows))
 		}
 		m.detail.tailScroll = 0
-		m.detail.snapScroll = 0
+		m.detail.artifactScroll = 0
 
 	case "k", "up":
 		m.detail.iterCursor--
@@ -645,13 +673,19 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.detail.clampCursor(len(rows))
 		}
 		m.detail.tailScroll = 0
-		m.detail.snapScroll = 0
+		m.detail.artifactScroll = 0
 
 	case "enter":
 		cursor := m.detail.iterCursor
 		if cursor >= 0 && cursor < len(rows) && rows[cursor].IsInProgress {
 			m.detail.focusRight = true
 			m.detail.tailScroll = 0
+		} else if m.detail.showArtifact && cursor >= 0 && cursor < len(rows) && !rows[cursor].IsInitialPrompt {
+			// Focus right pane for artifact scrolling.
+			if idx := rows[cursor].SnapshotIndex; idx >= 0 && idx < len(snaps) && snaps[idx].Artifact != "" {
+				m.detail.focusRight = true
+				m.detail.artifactScroll = 0
+			}
 		} else if cursor >= 0 && cursor < len(rows) && !rows[cursor].IsInitialPrompt {
 			if idx := rows[cursor].SnapshotIndex; idx >= 0 && idx < len(snaps) {
 				snap := snaps[idx]
@@ -659,17 +693,6 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					m.detail.beadFocused = true
 					m.detail.beadCursor = 0
 					m.detail.beadShowOutput = ""
-					// Scroll snapshot to beads section.
-					leftWidth := 27
-					rightWidth := m.width - leftWidth
-					if rightWidth < 14 {
-						rightWidth = 14
-					}
-					innerRight := rightWidth - 2
-					_, beadsLine := renderSnapshotDetail(snaps, idx, innerRight, false, 0)
-					if beadsLine >= 0 {
-						m.detail.snapScroll = beadsLine
-					}
 				}
 			}
 		}
@@ -684,6 +707,12 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		if st != nil {
 			m.orch.Stop(st.ID)
+			return m.setStatus("Pausing after current step completes…")
+		}
+
+	case "X":
+		if st != nil {
+			m.orch.Kill(st.ID)
 		}
 
 	case "g":
@@ -810,6 +839,10 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateDetailFocusRight(msg tea.KeyPressMsg, st *stream.Stream) (tea.Model, tea.Cmd) {
+	if m.detail.showArtifact {
+		return m.updateArtifactScroll(msg, st)
+	}
+
 	lineCount := 0
 	if st != nil {
 		lineCount = len(st.GetOutputLines())
@@ -841,6 +874,114 @@ func (m Model) updateDetailFocusRight(msg tea.KeyPressMsg, st *stream.Stream) (t
 	return m, nil
 }
 
+func (m Model) updateArtifactScroll(msg tea.KeyPressMsg, st *stream.Stream) (tea.Model, tea.Cmd) {
+	maxScroll := m.computeArtifactMaxScroll(st)
+
+	switch msg.String() {
+	case "esc":
+		m.detail.focusRight = false
+		return m, nil
+
+	case "f":
+		m.detail.showArtifact = false
+		m.detail.focusRight = false
+		m.detail.artifactScroll = 0
+
+	case "j", "down":
+		if m.detail.artifactScroll < maxScroll {
+			m.detail.artifactScroll++
+		}
+
+	case "k", "up":
+		if m.detail.artifactScroll > 0 {
+			m.detail.artifactScroll--
+		}
+
+	case "G":
+		m.detail.artifactScroll = maxScroll
+	}
+
+	return m, nil
+}
+
+func (m Model) computeArtifactMaxScroll(st *stream.Stream) int {
+	if st == nil {
+		return 0
+	}
+	snaps := st.GetSnapshots()
+	rows := buildIterationList(st)
+	cursor := m.detail.iterCursor
+	if cursor < 0 || cursor >= len(rows) {
+		return 0
+	}
+	idx := rows[cursor].SnapshotIndex
+	if idx < 0 || idx >= len(snaps) || snaps[idx].Artifact == "" {
+		return 0
+	}
+	leftWidth := 27
+	rightWidth := m.width - leftWidth
+	if rightWidth < 14 {
+		rightWidth = 14
+	}
+	innerRight := rightWidth - 2
+	rendered := renderArtifactDetail(snaps, idx, innerRight)
+	totalLines := strings.Count(rendered, "\n") + 1
+
+	paneHeight := m.height - 4
+	innerHeight := paneHeight - 2
+	visibleLines := innerHeight - 1 // -1 for status marker line
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+	maxScroll := totalLines - visibleLines
+	if maxScroll < 0 {
+		return 0
+	}
+	return maxScroll
+}
+
+func (m Model) handleDetailScroll(msg tea.MouseWheelMsg) Model {
+	scrollAmount := 3
+	st := m.orch.Get(m.selectedID)
+
+	if m.detail.showArtifact {
+		maxScroll := m.computeArtifactMaxScroll(st)
+		if msg.Button == tea.MouseWheelUp {
+			m.detail.artifactScroll -= scrollAmount
+			if m.detail.artifactScroll < 0 {
+				m.detail.artifactScroll = 0
+			}
+		} else if msg.Button == tea.MouseWheelDown {
+			m.detail.artifactScroll += scrollAmount
+			if m.detail.artifactScroll > maxScroll {
+				m.detail.artifactScroll = maxScroll
+			}
+		}
+	} else {
+		lineCount := 0
+		if st != nil {
+			lineCount = len(st.GetOutputLines())
+		}
+		maxScroll := lineCount - 5
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if msg.Button == tea.MouseWheelUp {
+			m.detail.tailScroll += scrollAmount
+			if m.detail.tailScroll > maxScroll {
+				m.detail.tailScroll = maxScroll
+			}
+		} else if msg.Button == tea.MouseWheelDown {
+			m.detail.tailScroll -= scrollAmount
+			if m.detail.tailScroll < 0 {
+				m.detail.tailScroll = 0
+			}
+		}
+	}
+
+	return m
+}
+
 func (m Model) updateDetailBeadBrowse(msg tea.KeyPressMsg, st *stream.Stream, rows []iterationRow) (tea.Model, tea.Cmd) {
 	cursor := m.detail.iterCursor
 	var beadCount int
@@ -860,7 +1001,6 @@ func (m Model) updateDetailBeadBrowse(msg tea.KeyPressMsg, st *stream.Stream, ro
 		} else {
 			m.detail.beadFocused = false
 			m.detail.beadCursor = 0
-			m.detail.snapScroll = 0
 		}
 		return m, nil
 
@@ -1267,6 +1407,20 @@ func (m Model) updateForceAdvance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateQuitConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "y", "enter":
+			return m, tea.Quit
+		case "n", "esc":
+			m.showQuitConfirm = false
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -1447,10 +1601,23 @@ func (m Model) updateRevise(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	v := tea.NewView(m.viewString())
 	v.AltScreen = true
+	if m.view == viewDetail && m.detail.focusRight {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 
 func (m Model) viewString() string {
+	if m.showQuitConfirm {
+		runningCount := 0
+		for _, st := range m.orch.List() {
+			if st.GetStatus() == stream.StatusRunning {
+				runningCount++
+			}
+		}
+		return renderQuitConfirmOverlay(runningCount, m.width, m.height)
+	}
+
 	if m.showRestartPrompt {
 		return renderRestartPromptOverlay(m.width, m.height)
 	}
@@ -1749,6 +1916,23 @@ func renderForceAdvanceOverlay(nextPhase string, width, height int) string {
 	overlay += helpStyle.Render(">: confirm  esc: cancel")
 
 	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderQuitConfirmOverlay(runningCount int, width, height int) string {
+	overlay := overlayTitleStyle.Render("Quit Streams") + "\n\n"
+	if runningCount > 0 {
+		label := "stream is"
+		if runningCount > 1 {
+			label = "streams are"
+		}
+		overlay += fmt.Sprintf("%d %s currently running.\n", runningCount, label)
+		overlay += helpStyle.Render("Running streams will be interrupted and auto-resumed on restart.") + "\n\n"
+	}
+	overlay += "Are you sure you want to quit?\n\n"
+	overlay += helpStyle.Render("y/enter: quit  esc: cancel")
+
+	box := overlayStyle.Width(overlayWidth(width, 70)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
