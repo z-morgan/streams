@@ -35,6 +35,7 @@ type streamData struct {
 	BaseSHA       string    `json:"base_sha"`
 	Branch        string    `json:"branch"`
 	WorkTree      string    `json:"worktree"`
+	MCPConfigPath   string        `json:"mcp_config_path,omitempty"`
 	EnvironmentPort int           `json:"environment_port,omitempty"`
 	SessionID     string          `json:"session_id,omitempty"`
 	Models        *modelConfigData `json:"models,omitempty"`
@@ -213,6 +214,7 @@ func toStreamData(st *stream.Stream) streamData {
 		Iteration:     st.GetIteration(),
 		Converged:     st.Converged,
 		BeadsParentID: st.BeadsParentID,
+		MCPConfigPath:   st.GetMCPConfigPath(),
 		EnvironmentPort: st.GetEnvironmentPort(),
 		SessionID:     st.GetSessionID(),
 		BaseSHA:       st.BaseSHA,
@@ -265,6 +267,7 @@ func fromStreamData(d streamData) *stream.Stream {
 		IterStep:      parseIterStep(d.IterStep),
 		Converged:     d.Converged,
 		BeadsParentID: d.BeadsParentID,
+		MCPConfigPath:   d.MCPConfigPath,
 		EnvironmentPort: d.EnvironmentPort,
 		SessionID:     d.SessionID,
 		BaseSHA:       d.BaseSHA,

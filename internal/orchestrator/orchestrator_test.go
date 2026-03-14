@@ -30,7 +30,7 @@ func (s *testSink) Events() []Event {
 
 func TestListAndGet(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	if len(o.List()) != 0 {
 		t.Fatal("expected empty list")
@@ -57,7 +57,7 @@ func TestLoadExisting(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	o := New(s, Config{}, nil)
+	o := New(s, Config{}, nil, nil)
 	if err := o.LoadExisting(); err != nil {
 		t.Fatalf("LoadExisting: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestLoadExisting(t *testing.T) {
 
 func TestSendGuidance(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	// Add a stream directly for testing.
 	st := &stream.Stream{
@@ -102,7 +102,7 @@ func TestSendGuidance(t *testing.T) {
 
 func TestSendGuidanceMissingStream(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	err := o.SendGuidance("nonexistent", "hello")
 	if err == nil {
@@ -112,7 +112,7 @@ func TestSendGuidanceMissingStream(t *testing.T) {
 
 func TestStartMissingStream(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	err := o.Start("nonexistent")
 	if err == nil {
@@ -122,7 +122,7 @@ func TestStartMissingStream(t *testing.T) {
 
 func TestIsRunning(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	if o.IsRunning("nope") {
 		t.Fatal("expected not running")
@@ -131,7 +131,7 @@ func TestIsRunning(t *testing.T) {
 
 func TestEventSink(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	sink := &testSink{}
 	o.SetSink(sink)
@@ -162,7 +162,7 @@ func TestValidatePipeline(t *testing.T) {
 
 func TestEmitWithNilSink(t *testing.T) {
 	root := t.TempDir()
-	o := New(&store.Store{Root: root}, Config{}, nil)
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
 
 	// Should not panic.
 	o.emit(Event{StreamID: "test", Kind: EventStarted})

@@ -14,7 +14,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/zmorgan/streams/internal/config"
 	"github.com/zmorgan/streams/internal/environment"
+	"github.com/zmorgan/streams/internal/environment/scaffold"
 	"github.com/zmorgan/streams/internal/loop"
+	"github.com/zmorgan/streams/internal/mcp"
 	"github.com/zmorgan/streams/internal/orchestrator"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/runtime/claude"
@@ -36,6 +38,8 @@ func run() int {
 		case "--version", "-v":
 			fmt.Println("streams " + Version)
 			return 0
+		case "init":
+			return runInit()
 		case "prompts":
 			return runPrompts(os.Args[2:])
 		case "config":
@@ -107,6 +111,11 @@ func run() int {
 	}
 	envManager := environment.NewManager(envCfg)
 
+	mcpCfg, err := mcp.LoadConfig(workDir)
+	if err != nil {
+		slog.Warn("failed to load MCP config, MCP disabled", "err", err)
+	}
+
 	s := &store.Store{Root: storeRoot}
 	orch := orchestrator.New(s, orchestrator.Config{
 		MaxIterations: maxIterations,
@@ -114,7 +123,7 @@ func run() int {
 		RepoDir:       workDir,
 		Pipeline:      pipelinePhases,
 		PolishSlots:   polishSlots,
-	}, envManager)
+	}, envManager, mcpCfg)
 
 	if err := orch.LoadExisting(); err != nil {
 		slog.Error("failed to load existing streams", "err", err)
@@ -315,6 +324,86 @@ func flagOverrides() config.Config {
 		}
 	})
 	return cfg
+}
+
+func runInit() int {
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	// Check Docker is available
+	ctx := context.Background()
+	if err := scaffold.CheckDockerAvailable(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "Docker Compose v2 is required for stream environments.")
+		fmt.Fprintln(os.Stderr, "Install Docker Desktop or Docker Engine, then try again.")
+		return 1
+	}
+
+	// Check for existing generated files
+	for _, name := range []string{"docker-compose.streams.yml", "Dockerfile.streams"} {
+		if _, err := os.Stat(filepath.Join(workDir, name)); err == nil {
+			fmt.Fprintf(os.Stderr, "%s already exists. Use --force to overwrite.\n", name)
+			return 1
+		}
+	}
+
+	// Detect project profile
+	profile := scaffold.DetectProfile(workDir)
+
+	// Show confirmation form
+	model := scaffold.NewConfirmModel(profile)
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	result := finalModel.(scaffold.ConfirmModel).Result()
+	if !result.Confirmed {
+		fmt.Println("Cancelled.")
+		return 0
+	}
+
+	// Generate files
+	files := scaffold.BuildTemplate(result.Profile)
+
+	// Write files
+	if err := os.WriteFile(filepath.Join(workDir, "docker-compose.streams.yml"), []byte(files.Compose), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing docker-compose.streams.yml: %v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "Dockerfile.streams"), []byte(files.Dockerfile), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing Dockerfile.streams: %v\n", err)
+		return 1
+	}
+
+	streamsDir := filepath.Join(workDir, ".streams")
+	if err := os.MkdirAll(streamsDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "error creating .streams directory: %v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(filepath.Join(streamsDir, "environment.json"), []byte(files.Environment), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing environment.json: %v\n", err)
+		return 1
+	}
+
+	fmt.Println("Generated:")
+	fmt.Println("  docker-compose.streams.yml")
+	fmt.Println("  Dockerfile.streams")
+	fmt.Println("  .streams/environment.json")
+
+	// Validate
+	if err := scaffold.ValidateCompose(ctx, workDir, "docker-compose.streams.yml"); err != nil {
+		fmt.Fprintf(os.Stderr, "\nWarning: %v\n", err)
+		fmt.Fprintln(os.Stderr, "The generated files may need manual adjustment.")
+	} else {
+		fmt.Println("\nCompose file validated successfully.")
+	}
+
+	return 0
 }
 
 func resolveDir(dir string) (string, error) {

@@ -140,6 +140,7 @@ type Stream struct {
 	PendingRevise *PendingRevise // queued revise for running streams
 	Models        ModelConfig     // per-phase model selections
 	Notify        NotifySettings // notification preferences for converge/error events
+	MCPConfigPath   string         // absolute path to .streams/mcp.json (empty = no MCP)
 	EnvironmentPort int            // host port for containerized app server (0 = no environment)
 	OutputLines    []string       // ring buffer of recent CLI output for tail view
 	reviseFrom     string         // transient: phase name we revised FROM (consumed by next snapshot)
@@ -406,6 +407,20 @@ func (s *Stream) DrainPendingRevise() *PendingRevise {
 	s.PendingRevise = nil
 	s.mu.Unlock()
 	return pr
+}
+
+func (s *Stream) SetMCPConfigPath(path string) {
+	s.mu.Lock()
+	s.MCPConfigPath = path
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetMCPConfigPath() string {
+	s.mu.RLock()
+	path := s.MCPConfigPath
+	s.mu.RUnlock()
+	return path
 }
 
 func (s *Stream) SetEnvironmentPort(port int) {
