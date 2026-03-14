@@ -3,6 +3,7 @@ package loop
 import (
 	"fmt"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -37,6 +38,7 @@ type PhaseContext struct {
 	PromptOverrideDirs []string // per-stream and project prompt override directories
 	MCPConfigPath      string   // absolute path to mcp.json (empty = no MCP)
 	MCPToolPatterns    []string // e.g. ["mcp__chrome-devtools__*"]
+	ConvergenceConfig  *convergence.ResolvedConfig // nil = use legacy convergence
 }
 
 // IterationResult captures the outcome of a single iteration for convergence detection.

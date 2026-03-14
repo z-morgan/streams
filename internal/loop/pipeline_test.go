@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -49,7 +50,7 @@ func TestFullPipelineThreePhases(t *testing.T) {
 		ids("b-3"), nil, nil,
 	}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, pipelineFactory, nil)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, pipelineFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -91,7 +92,7 @@ func TestFullPipelineErrorPausesStream(t *testing.T) {
 		ids("b-2"),
 	}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, pipelineFactory, nil)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, pipelineFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -136,7 +137,7 @@ func TestFullPipelineCheckpointCallback(t *testing.T) {
 		checkpoints++
 	}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, pipelineFactory, onCheckpoint)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, pipelineFactory, onCheckpoint, convergence.Config{})
 
 	if checkpoints != 2 {
 		t.Errorf("expected 2 checkpoint callbacks, got %d", checkpoints)

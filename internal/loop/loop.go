@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -32,7 +33,7 @@ type PhaseFactory func(name string) (MacroPhase, error)
 // (StatusPaused+Converged, StatusPaused+LastError, or StatusStopped).
 // promptOverrideDirs are checked in order before the global user prompts dir
 // (typically [per-stream dir, project dir]).
-func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, git GitQuerier, maxIterations int, factory PhaseFactory, onCheckpoint func(*stream.Stream), promptOverrideDirs ...string) {
+func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Runtime, beads BeadsQuerier, git GitQuerier, maxIterations int, factory PhaseFactory, onCheckpoint func(*stream.Stream), globalConvergence convergence.Config, promptOverrideDirs ...string) {
 	s.SetStatus(stream.StatusRunning)
 	s.ClearOutput()
 
@@ -74,8 +75,20 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 	}
 
+	// Resolve convergence config: global ← per-stream.
+	mergedConvergence := convergence.Merge(globalConvergence, s.GetConvergence())
+
 	var pendingGuidance []stream.Guidance
 	startIteration := s.GetIteration()
+
+	// Previous artifact content for section tracking diffs.
+	var prevArtifact string
+	if af := phase.ArtifactFile(); af != "" {
+		data, err := os.ReadFile(filepath.Join(s.WorkTree, af))
+		if err == nil {
+			prevArtifact = string(data)
+		}
+	}
 
 	for {
 		// Check for graceful pause request before starting a new iteration.
@@ -206,6 +219,24 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
+		// --- Section tracking (convergence) ---
+		// After implement, diff the artifact to track section changes.
+		convCfg := mergedConvergence.Resolved(phase.Name())
+		var newlyFrozen []string
+		if af := phase.ArtifactFile(); af != "" {
+			curData, err := os.ReadFile(filepath.Join(s.WorkTree, af))
+			if err == nil {
+				curArtifact := string(curData)
+				tracker := s.EnsureSectionTracker()
+				newlyFrozen = tracker.RecordChanges(prevArtifact, curArtifact, iteration, convCfg, phase.Name())
+				prevArtifact = curArtifact
+
+				for _, secID := range newlyFrozen {
+					slog.Info("section frozen", "stream", s.ID, "phase", phase.Name(), "section", secID, "iteration", iteration)
+				}
+			}
+		}
+
 		// --- StepAutosquash ---
 		s.SetIterStep(stream.StepAutosquash)
 
@@ -260,6 +291,24 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				return
 			}
 
+			// Inject convergence context into the review prompt.
+			if reviewPrompt != "" {
+				tracker := s.GetSectionTracker()
+				var frozenSections []convergence.FrozenSection
+				if tracker != nil {
+					frozenSections = tracker.FrozenSections()
+				}
+				convBlock := convergence.RenderPromptBlock(convergence.PromptContext{
+					Iteration:           iteration,
+					Phase:               phase.Name(),
+					Mode:                convCfg.Mode,
+					RefinementCap:       convCfg.RefinementCap,
+					MaxSectionRevisions: convCfg.MaxSectionRevisions,
+					FrozenSections:      frozenSections,
+				})
+				reviewPrompt += convBlock
+			}
+
 			if reviewPrompt == "" {
 				// Phase has no review step (e.g. ReviewPhase). Skip the runtime call.
 				reviewResp = &runtime.Response{}
@@ -308,7 +357,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			beadsOpened = setDiff(idsAfterReview, idsAfterImpl)
 		}
 
-		// --- Convergence check ---
+		// --- Convergence check (tier-based) ---
 		result := IterationResult{
 			ReviewText:       reviewResp.Text,
 			OpenBeforeReview: len(idsAfterImpl),
@@ -316,7 +365,38 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			BeadsClosed:      beadsClosed,
 			BeadsOpened:      beadsOpened,
 		}
-		converged := phase.IsConverged(result)
+
+		// Post-review filter: classify newly filed issues by tier and label advisory ones.
+		var converged bool
+		if len(beadsOpened) > 0 {
+			titles, _ := beads.FetchAllChildTitles(s.BeadsParentID)
+			tracker := s.GetSectionTracker()
+
+			var issues []convergence.IssueInput
+			for _, id := range beadsOpened {
+				issues = append(issues, convergence.IssueInput{
+					ID:    id,
+					Title: titles[id],
+				})
+			}
+
+			classifications := convergence.ClassifyIssues(issues, convCfg, iteration, tracker)
+
+			// Label advisory issues so the implement step skips them.
+			for _, c := range classifications {
+				if !c.Blocking {
+					if err := beads.LabelIssue(c.ID, "advisory"); err != nil {
+						slog.Warn("failed to label advisory issue", "stream", s.ID, "issue", c.ID, "err", err)
+					}
+					slog.Info("issue reclassified as advisory", "stream", s.ID, "issue", c.ID, "reason", c.Reason, "tier", c.Tier.String())
+				}
+			}
+
+			converged = convergence.Converged(classifications)
+		} else {
+			// No new issues filed → use legacy convergence check.
+			converged = phase.IsConverged(result)
+		}
 
 		// --- StepCheckpoint ---
 		s.SetIterStep(stream.StepCheckpoint)
@@ -396,6 +476,9 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				s.SetIteration(0)
 				phase = nextPhase
 				pendingGuidance = nil
+				s.SetSectionTracker(nil) // reset section tracker for new phase
+				prevArtifact = ""
+				mergedConvergence = convergence.Merge(globalConvergence, s.GetConvergence())
 				slog.Info("auto-advancing pipeline", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
 
 				// If the next phase is slotted (e.g. polish), run its slots
@@ -437,6 +520,9 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			phase = newPhase
 			pendingGuidance = s.DrainGuidance()
 			startIteration = 0
+			s.SetSectionTracker(nil) // reset section tracker for revised phase
+			prevArtifact = ""
+			mergedConvergence = convergence.Merge(globalConvergence, s.GetConvergence())
 			slog.Info("applying queued revise", "stream", s.ID, "fromPhase", fromPhase, "targetPhase", newPhase.Name())
 			continue
 		}

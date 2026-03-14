@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/diagnosis"
 	"github.com/zmorgan/streams/internal/environment"
 	"github.com/zmorgan/streams/internal/loop"
@@ -51,9 +52,10 @@ const (
 type Config struct {
 	MaxIterations int
 	MaxBudgetUSD  string
-	RepoDir       string   // the main repository directory
-	Pipeline      []string // ordered macro-phase names; defaults to ["coding"]
-	PolishSlots   []string // nil = use built-in defaults; explicit list replaces defaults
+	RepoDir       string             // the main repository directory
+	Pipeline      []string           // ordered macro-phase names; defaults to ["coding"]
+	PolishSlots   []string           // nil = use built-in defaults; explicit list replaces defaults
+	Convergence   convergence.Config // global convergence settings
 }
 
 // Orchestrator manages the lifecycle of multiple streams.
@@ -285,7 +287,7 @@ func (o *Orchestrator) Start(id string) error {
 		loop.Run(ctx, st, phase, rt, beads, git, o.config.MaxIterations, factory, func(s *stream.Stream) {
 			o.checkpoint(s)
 			o.emit(Event{StreamID: s.ID, Kind: EventCheckpoint})
-		}, promptDirs...)
+		}, o.config.Convergence, promptDirs...)
 
 		// Persist final state.
 		o.checkpoint(st)

@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/zmorgan/streams/internal/config"
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/environment"
 	"github.com/zmorgan/streams/internal/environment/scaffold"
 	"github.com/zmorgan/streams/internal/loop"
@@ -123,6 +124,7 @@ func run() int {
 		RepoDir:       workDir,
 		Pipeline:      pipelinePhases,
 		PolishSlots:   polishSlots,
+		Convergence:   cfg.Convergence,
 	}, envManager, mcpCfg)
 
 	if err := orch.LoadExisting(); err != nil {
@@ -131,7 +133,7 @@ func run() int {
 	}
 
 	if *headless {
-		return runHeadless(orch, workDir, *task, maxIterations, budgetUSD)
+		return runHeadless(orch, workDir, *task, maxIterations, budgetUSD, cfg.Convergence)
 	}
 
 	return runTUI(orch, storeRoot)
@@ -165,7 +167,7 @@ func runTUI(orch *orchestrator.Orchestrator, storeRoot string) int {
 	return 0
 }
 
-func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxIterations int, maxBudget string) int {
+func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxIterations int, maxBudget string, convCfg convergence.Config) int {
 	if task == "" {
 		fmt.Fprintln(os.Stderr, "error: --task is required in headless mode")
 		flag.Usage()
@@ -207,7 +209,7 @@ func runHeadless(orch *orchestrator.Orchestrator, workDir, task string, maxItera
 		filepath.Join(storeRoot, "streams", st.ID, "prompts"),
 		filepath.Join(storeRoot, "prompts"),
 	}
-	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase, nil, promptDirs...)
+	loop.Run(ctx, st, phase, rt, beads, git, maxIterations, loop.NewPhase, nil, convCfg, promptDirs...)
 
 	switch {
 	case st.GetStatus() == stream.StatusStopped:

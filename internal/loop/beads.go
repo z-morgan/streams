@@ -20,6 +20,7 @@ type BeadsQuerier interface {
 	ListOpenChildren(parentID string) ([]string, error)
 	FetchOrderedSteps(parentID string) ([]Step, error)
 	FetchAllChildTitles(parentID string) (map[string]string, error)
+	LabelIssue(id, label string) error
 }
 
 // CLIBeadsQuerier shells out to the bd CLI to query beads issues.
@@ -87,6 +88,15 @@ func (q *CLIBeadsQuerier) FetchAllChildTitles(parentID string) (map[string]strin
 		titles[c.ID] = c.Title
 	}
 	return titles, nil
+}
+
+func (q *CLIBeadsQuerier) LabelIssue(id, label string) error {
+	cmd := exec.Command("bd", "label", "add", id, label)
+	cmd.Dir = q.WorkDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("bd label add %s %s: %w", id, label, err)
+	}
+	return nil
 }
 
 // fetchChildren runs bd show --children --json and parses the map-keyed response.

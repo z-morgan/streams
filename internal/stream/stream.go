@@ -151,8 +151,9 @@ type Stream struct {
 	Notify          NotifySettings // notification preferences for converge/error events
 	MCPConfigPath   string              // absolute path to .streams/mcp.json (empty = no MCP)
 	EnvironmentPort int                 // host port for containerized app server (0 = no environment)
-	Convergence     convergence.Config  // per-stream convergence overrides
-	OutputLines     []string            // ring buffer of recent CLI output for tail view
+	Convergence       convergence.Config   // per-stream convergence overrides
+	SectionTracker    *convergence.Tracker // per-phase section tracking state (transient, not persisted in stream.json)
+	OutputLines       []string            // ring buffer of recent CLI output for tail view
 	reviseFrom      string         // transient: phase name we revised FROM (consumed by next snapshot)
 	reviseFeedback  string         // transient: user feedback that triggered the revision
 	CreatedAt       time.Time
@@ -514,6 +515,30 @@ func (s *Stream) GetConvergence() convergence.Config {
 	c := s.Convergence
 	s.mu.RUnlock()
 	return c
+}
+
+func (s *Stream) GetSectionTracker() *convergence.Tracker {
+	s.mu.RLock()
+	t := s.SectionTracker
+	s.mu.RUnlock()
+	return t
+}
+
+func (s *Stream) SetSectionTracker(t *convergence.Tracker) {
+	s.mu.Lock()
+	s.SectionTracker = t
+	s.mu.Unlock()
+}
+
+// EnsureSectionTracker returns the existing tracker or creates a new one.
+func (s *Stream) EnsureSectionTracker() *convergence.Tracker {
+	s.mu.Lock()
+	if s.SectionTracker == nil {
+		s.SectionTracker = convergence.NewTracker()
+	}
+	t := s.SectionTracker
+	s.mu.Unlock()
+	return t
 }
 
 func (s *Stream) SetFallback(fc FallbackConfig) {

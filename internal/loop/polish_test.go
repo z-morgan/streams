@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -22,7 +23,7 @@ func TestRunSlotsDiffScoped(t *testing.T) {
 
 	phase := NewPolishPhase([]string{"commits"})
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -74,7 +75,7 @@ func TestRunSlotsMultipleSlots(t *testing.T) {
 		{Name: "second", Scope: ScopeDiff, Tools: []string{"Bash"}},
 	}
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if !s.Converged {
 		t.Error("expected Converged=true")
@@ -110,7 +111,7 @@ func TestRunSlotsSlotFailureContinues(t *testing.T) {
 		},
 	}
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if !s.Converged {
 		t.Error("expected Converged=true despite slot failure")
@@ -143,7 +144,7 @@ func TestRunSlotsContextCancellation(t *testing.T) {
 
 	phase := NewPolishPhase([]string{"commits"})
 
-	Run(ctx, s, phase, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(ctx, s, phase, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusStopped {
 		t.Errorf("expected StatusStopped, got %s", s.GetStatus())
@@ -166,7 +167,7 @@ func TestRunSlotsOnCheckpointCalled(t *testing.T) {
 	checkpointCount := 0
 	onCheckpoint := func(_ *stream.Stream) { checkpointCount++ }
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, onCheckpoint)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, onCheckpoint, convergence.Config{})
 
 	if checkpointCount != 1 {
 		t.Errorf("expected 1 checkpoint call, got %d", checkpointCount)
@@ -237,7 +238,7 @@ func TestRunSlotsCommitScopedGetsCommitData(t *testing.T) {
 		},
 	}
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if !s.Converged {
 		t.Error("expected Converged=true")
@@ -262,7 +263,7 @@ func TestRunSlotsCommitScopedSlotUsesLintTemplate(t *testing.T) {
 
 	phase := NewPolishPhase([]string{"lint"})
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if !s.Converged {
 		t.Error("expected Converged=true")
@@ -288,7 +289,7 @@ func TestRunSlotsRubocopSlotUsesTemplate(t *testing.T) {
 
 	phase := NewPolishPhase([]string{"rubocop"})
 
-	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if !s.Converged {
 		t.Error("expected Converged=true")
@@ -341,7 +342,7 @@ func TestPipelineCodingToPolish(t *testing.T) {
 		return &mockAutoAdvancePhase{}, nil
 	}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, polishFactory, nil)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, polishFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())

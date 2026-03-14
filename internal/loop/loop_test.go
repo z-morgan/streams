@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/stream"
 )
@@ -53,6 +54,10 @@ func (m *mockBeads) FetchOrderedSteps(_ string) ([]Step, error) {
 
 func (m *mockBeads) FetchAllChildTitles(_ string) (map[string]string, error) {
 	return nil, nil
+}
+
+func (m *mockBeads) LabelIssue(_, _ string) error {
+	return nil
 }
 
 // mockGit returns a fixed HEAD SHA that increments per call.
@@ -125,7 +130,7 @@ func TestRunConvergesOnFirstIteration(t *testing.T) {
 	// Per iteration: idsBefore, idsAfterImpl, idsAfterReview
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -153,7 +158,7 @@ func TestRunSnapshotPopulatesFields(t *testing.T) {
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), ids("b-2"), ids("b-2", "b-3")}}
 
 	// maxIterations=1 so it pauses after one iteration regardless of convergence.
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 1, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 1, mockFactory, nil, convergence.Config{})
 
 	// Expect 2 snapshots: the iteration snapshot + the MaxIterations error snapshot.
 	if len(s.Snapshots) != 2 {
@@ -191,7 +196,7 @@ func TestRunMultipleIterations(t *testing.T) {
 		ids("b-3", "b-4", "b-5"), nil, nil,
 	}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -212,7 +217,7 @@ func TestRunContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancelled
 
-	Run(ctx, s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(ctx, s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusStopped {
 		t.Errorf("expected StatusStopped, got %s", s.GetStatus())
@@ -236,7 +241,7 @@ func TestRunAutoAdvancesToNextPhase(t *testing.T) {
 		ids("b-3"), nil, nil,
 	}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -264,7 +269,7 @@ func TestRunAutoAdvancePausesWhenPipelineExhausted(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -289,7 +294,7 @@ func TestRunPauseTransitionDoesNotAdvance(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.PipelineIndex != 0 {
 		t.Errorf("expected PipelineIndex=0 (pause should not advance), got %d", s.PipelineIndex)
@@ -309,7 +314,7 @@ func TestRunStoresSessionID(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetSessionID() != "sess-abc" {
 		t.Errorf("got session_id %q, want %q", s.GetSessionID(), "sess-abc")
@@ -329,7 +334,7 @@ func TestRunBreakpointPausesAutoAdvance(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockAutoAdvancePhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	// Should pause at breakpoint, NOT auto-advance to coding.
 	if s.PipelineIndex != 0 {
@@ -356,7 +361,7 @@ func TestRunResumeFromConvergedAdvancesPhase(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1"), nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	// Should have advanced to phase 1 and then converged.
 	if s.PipelineIndex != 1 {
@@ -373,7 +378,7 @@ func TestRunResumeFromConvergedLastPhasePauses(t *testing.T) {
 	s.PipelineIndex = 0
 	s.Converged = true // already at last phase and converged
 
-	Run(context.Background(), s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, &mockRuntime{}, &mockBeads{}, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	// Should immediately pause — nothing to advance to.
 	if s.GetStatus() != stream.StatusPaused {
@@ -393,7 +398,7 @@ func TestRunRuntimeError(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2")}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -417,7 +422,7 @@ func TestRunContinuesPastAutosquashFailure(t *testing.T) {
 	// Per iteration: idsBefore, idsAfterImpl, idsAfterReview
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockAutosquashFailPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockAutosquashFailPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	// Loop should converge normally despite autosquash failure.
 	if s.GetStatus() != stream.StatusPaused {
@@ -452,7 +457,7 @@ func TestRunConvergesWhenAllBeadsAlreadyClosed(t *testing.T) {
 	// All beads already closed: idsBefore=[], idsAfterImpl=[], idsAfterReview=[]
 	beads := &mockBeads{openIDs: [][]string{nil, nil, nil}}
 
-	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -480,7 +485,7 @@ func TestRunSkipsReviewWhenPromptEmpty(t *testing.T) {
 	}
 	beads := &mockBeads{openIDs: [][]string{ids("b-1", "b-2"), nil, nil}}
 
-	Run(context.Background(), s, &mockNoReviewPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil)
+	Run(context.Background(), s, &mockNoReviewPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
 
 	if s.GetStatus() != stream.StatusPaused {
 		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
@@ -525,7 +530,7 @@ func TestRunMaxIterationsIncludesPhaseAndDiagnostic(t *testing.T) {
 	}}
 
 	phase := &mockAutoAdvancePhase{}
-	Run(context.Background(), s, phase, rt, beads, &mockGit{}, 2, mockFactory, nil)
+	Run(context.Background(), s, phase, rt, beads, &mockGit{}, 2, mockFactory, nil, convergence.Config{})
 
 	if s.LastError == nil {
 		t.Fatal("expected MaxIterations error")
