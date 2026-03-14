@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/zmorgan/streams/internal/convergence"
 )
 
 // Config holds all persistent settings. Zero values mean "not set" so that
@@ -28,6 +30,7 @@ type Config struct {
 	MaxIterations    *int    // nil = not set
 	Pipeline         *string // nil = not set
 	PolishSlots      *string // nil = use built-in defaults; comma-separated slot names
+	Convergence      convergence.Config
 }
 
 // Defaults returns the built-in default configuration.
@@ -93,6 +96,7 @@ func merge(layers ...Config) Config {
 		if layer.PolishSlots != nil {
 			result.PolishSlots = layer.PolishSlots
 		}
+		result.Convergence = convergence.Merge(result.Convergence, layer.Convergence)
 	}
 	return result
 }
@@ -148,15 +152,29 @@ func LoadFile(path string) Config {
 func parse(r *os.File) Config {
 	cfg := Config{}
 	scanner := bufio.NewScanner(r)
+	section := "" // current TOML table, e.g. "convergence"
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
+		// Handle TOML table headers like [convergence].
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.TrimSpace(line[1 : len(line)-1])
+			continue
+		}
+
 		key, value, ok := parseLine(line)
 		if !ok {
 			continue
 		}
+
+		// Prefix key with section if inside a table.
+		if section != "" {
+			key = section + "." + key
+		}
+
 		switch key {
 		case "max-budget-per-step":
 			cfg.MaxBudgetPerStep = &value
@@ -168,6 +186,20 @@ func parse(r *os.File) Config {
 			cfg.Pipeline = &value
 		case "polish-slots":
 			cfg.PolishSlots = &value
+		case "convergence.mode":
+			m := convergence.ParseMode(value)
+			cfg.Convergence.Mode = &m
+		case "convergence.max-section-revisions":
+			if n, err := strconv.Atoi(value); err == nil {
+				cfg.Convergence.MaxSectionRevisions = &n
+			}
+		case "convergence.refinement-cap":
+			if n, err := strconv.Atoi(value); err == nil {
+				cfg.Convergence.RefinementCap = &n
+			}
+		case "convergence.section-detection":
+			sd := convergence.ParseSectionDetection(value)
+			cfg.Convergence.SectionDetection = &sd
 		}
 	}
 	return cfg
@@ -213,6 +245,23 @@ func WriteFile(path string, cfg Config) error {
 	if cfg.PolishSlots != nil {
 		fmt.Fprintf(&buf, "polish-slots = %q\n", *cfg.PolishSlots)
 	}
+
+	c := cfg.Convergence
+	if c.Mode != nil || c.MaxSectionRevisions != nil || c.RefinementCap != nil || c.SectionDetection != nil {
+		buf.WriteString("\n[convergence]\n")
+		if c.Mode != nil {
+			fmt.Fprintf(&buf, "mode = %q\n", c.Mode.String())
+		}
+		if c.MaxSectionRevisions != nil {
+			fmt.Fprintf(&buf, "max-section-revisions = %d\n", *c.MaxSectionRevisions)
+		}
+		if c.RefinementCap != nil {
+			fmt.Fprintf(&buf, "refinement-cap = %d\n", *c.RefinementCap)
+		}
+		if c.SectionDetection != nil {
+			fmt.Fprintf(&buf, "section-detection = %q\n", c.SectionDetection.String())
+		}
+	}
 	return os.WriteFile(path, []byte(buf.String()), 0o644)
 }
 
@@ -233,6 +282,24 @@ func SetInFile(path, key, value string) error {
 		cfg.Pipeline = &value
 	case "polish-slots":
 		cfg.PolishSlots = &value
+	case "convergence.mode":
+		m := convergence.ParseMode(value)
+		cfg.Convergence.Mode = &m
+	case "convergence.max-section-revisions":
+		if _, err := strconv.Atoi(value); err != nil {
+			return fmt.Errorf("convergence.max-section-revisions must be an integer, got %q", value)
+		}
+		n, _ := strconv.Atoi(value)
+		cfg.Convergence.MaxSectionRevisions = &n
+	case "convergence.refinement-cap":
+		if _, err := strconv.Atoi(value); err != nil {
+			return fmt.Errorf("convergence.refinement-cap must be an integer, got %q", value)
+		}
+		n, _ := strconv.Atoi(value)
+		cfg.Convergence.RefinementCap = &n
+	case "convergence.section-detection":
+		sd := convergence.ParseSectionDetection(value)
+		cfg.Convergence.SectionDetection = &sd
 	default:
 		return fmt.Errorf("unknown config key: %q", key)
 	}
@@ -258,10 +325,31 @@ func Format(cfg Config) string {
 	if cfg.PolishSlots != nil {
 		fmt.Fprintf(&buf, "polish-slots = %q\n", *cfg.PolishSlots)
 	}
+
+	c := cfg.Convergence
+	if c.Mode != nil || c.MaxSectionRevisions != nil || c.RefinementCap != nil || c.SectionDetection != nil {
+		buf.WriteString("\n[convergence]\n")
+		if c.Mode != nil {
+			fmt.Fprintf(&buf, "mode = %q\n", c.Mode.String())
+		}
+		if c.MaxSectionRevisions != nil {
+			fmt.Fprintf(&buf, "max-section-revisions = %d\n", *c.MaxSectionRevisions)
+		}
+		if c.RefinementCap != nil {
+			fmt.Fprintf(&buf, "refinement-cap = %d\n", *c.RefinementCap)
+		}
+		if c.SectionDetection != nil {
+			fmt.Fprintf(&buf, "section-detection = %q\n", c.SectionDetection.String())
+		}
+	}
 	return buf.String()
 }
 
 // ValidKeys returns the list of recognized config keys.
 func ValidKeys() []string {
-	return []string{"max-budget-per-step", "max-iterations", "pipeline", "polish-slots"}
+	return []string{
+		"max-budget-per-step", "max-iterations", "pipeline", "polish-slots",
+		"convergence.mode", "convergence.max-section-revisions",
+		"convergence.refinement-cap", "convergence.section-detection",
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/stream"
 )
 
@@ -41,6 +42,7 @@ type streamData struct {
 	Models          *modelConfigData   `json:"models,omitempty"`
 	Fallback        *fallbackData      `json:"fallback,omitempty"`
 	Notify          *notifyData        `json:"notify,omitempty"`
+	Convergence     *convergence.Config `json:"convergence,omitempty"`
 	LastError       *errData           `json:"last_error,omitempty"`
 	PendingRevise   *pendingReviseData `json:"pending_revise,omitempty"`
 	Guidance        []guidanceData     `json:"guidance,omitempty"`
@@ -242,6 +244,10 @@ func toStreamData(st *stream.Stream) streamData {
 	if n.Bell || n.Flash || n.System {
 		d.Notify = &notifyData{Bell: n.Bell, Flash: n.Flash, System: n.System}
 	}
+	c := st.GetConvergence()
+	if c.Mode != nil || c.MaxSectionRevisions != nil || c.RefinementCap != nil || c.SectionDetection != nil || c.Phases != nil {
+		d.Convergence = &c
+	}
 	if st.LastError != nil {
 		d.LastError = &errData{
 			Kind:    st.LastError.Kind.String(),
@@ -330,6 +336,9 @@ func fromStreamData(d streamData) *stream.Stream {
 			Flash:  d.Notify.Flash,
 			System: d.Notify.System,
 		}
+	}
+	if d.Convergence != nil {
+		st.Convergence = *d.Convergence
 	}
 	return st
 }

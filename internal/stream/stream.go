@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/zmorgan/streams/internal/convergence"
 )
 
 // IterStep tracks where we are within a single iteration.
@@ -147,9 +149,10 @@ type Stream struct {
 	Models          ModelConfig    // per-phase model selections
 	Fallback        FallbackConfig // rate limit fallback configuration
 	Notify          NotifySettings // notification preferences for converge/error events
-	MCPConfigPath   string         // absolute path to .streams/mcp.json (empty = no MCP)
-	EnvironmentPort int            // host port for containerized app server (0 = no environment)
-	OutputLines     []string       // ring buffer of recent CLI output for tail view
+	MCPConfigPath   string              // absolute path to .streams/mcp.json (empty = no MCP)
+	EnvironmentPort int                 // host port for containerized app server (0 = no environment)
+	Convergence     convergence.Config  // per-stream convergence overrides
+	OutputLines     []string            // ring buffer of recent CLI output for tail view
 	reviseFrom      string         // transient: phase name we revised FROM (consumed by next snapshot)
 	reviseFeedback  string         // transient: user feedback that triggered the revision
 	CreatedAt       time.Time
@@ -497,6 +500,20 @@ func (s *Stream) GetModels() ModelConfig {
 	mc := s.Models
 	s.mu.RUnlock()
 	return mc
+}
+
+func (s *Stream) SetConvergence(c convergence.Config) {
+	s.mu.Lock()
+	s.Convergence = c
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetConvergence() convergence.Config {
+	s.mu.RLock()
+	c := s.Convergence
+	s.mu.RUnlock()
+	return c
 }
 
 func (s *Stream) SetFallback(fc FallbackConfig) {
