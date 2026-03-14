@@ -230,9 +230,10 @@ func (o *Orchestrator) Start(id string) error {
 	o.done[id] = doneCh
 	o.mu.Unlock()
 
-	// Clear any previous error on resume and assign a fresh session ID so we
-	// don't collide with a stale Claude CLI process from a previous run.
+	// Clear any previous error/pause state on resume and assign a fresh session
+	// ID so we don't collide with a stale Claude CLI process from a previous run.
 	st.SetLastError(nil)
+	st.SetPauseRequested(false)
 	st.SetSessionID(newUUID())
 
 	// Re-iterate: if converged with pending guidance, reset convergence
@@ -308,8 +309,23 @@ func (o *Orchestrator) Start(id string) error {
 	return nil
 }
 
-// Stop cancels a running stream's loop goroutine.
+// Stop requests a graceful pause of the running stream's loop. The loop will
+// finish its current in-flight step, create a checkpoint, and transition to
+// StatusPaused. Use Kill for an immediate hard cancellation.
 func (o *Orchestrator) Stop(id string) {
+	o.mu.RLock()
+	st := o.streams[id]
+	_, running := o.cancels[id]
+	o.mu.RUnlock()
+	if st != nil && running {
+		st.SetPauseRequested(true)
+	}
+}
+
+// Kill immediately cancels a running stream's loop goroutine via context
+// cancellation. The in-flight Claude CLI process receives SIGINT and the
+// current iteration is abandoned without a snapshot.
+func (o *Orchestrator) Kill(id string) {
 	o.mu.Lock()
 	cancel, ok := o.cancels[id]
 	o.mu.Unlock()
@@ -438,7 +454,10 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 		logCmd := exec.Command("git", "log", "--oneline", baseSHA+"..HEAD")
 		logCmd.Dir = worktree
 		logOut, err := logCmd.Output()
-		if err == nil && len(strings.TrimSpace(string(logOut))) == 0 {
+		if err != nil {
+			return fmt.Errorf("failed to check commits on branch: %w", err)
+		}
+		if len(strings.TrimSpace(string(logOut))) == 0 {
 			return fmt.Errorf("no commits on branch — nothing to complete")
 		}
 	}

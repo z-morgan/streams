@@ -22,7 +22,6 @@ type detailView struct {
 	beadFocused    bool   // true when bead-browse mode is active
 	beadCursor     int    // index into combined bead list (closed then opened)
 	beadShowOutput string // cached bd show output for the selected bead
-	snapScroll     int    // scroll offset in snapshot view when bead-focused
 }
 
 func (d *detailView) clampCursor(count int) {
@@ -185,17 +184,8 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 				rightTitle = "Artifact"
 				right = renderArtifactDetail(snaps, row.SnapshotIndex, innerRight)
 			} else {
-				right, _ = renderSnapshotDetail(snaps, row.SnapshotIndex, innerRight, dv.beadFocused, dv.beadCursor)
+				right = renderSnapshotDetail(snaps, row.SnapshotIndex, innerRight, dv.beadFocused, dv.beadCursor)
 			}
-		}
-
-		// Scroll snapshot content to beads section when bead-focused.
-		if dv.beadFocused && dv.snapScroll > 0 && dv.beadShowOutput == "" {
-			rightLines := strings.Split(right, "\n")
-			if dv.snapScroll < len(rightLines) {
-				rightLines = rightLines[dv.snapScroll:]
-			}
-			right = strings.Join(rightLines, "\n")
 		}
 
 		// Scroll artifact content when focused on artifact pane.
@@ -287,7 +277,7 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 
 	var help string
 	if status == stream.StatusRunning {
-		help = "j/k: iterations  enter: focus output  a: attach  w: wrap up  x: stop"
+		help = "j/k: iterations  enter: focus output  a: attach  w: wrap up  x: pause  X: kill"
 		if canRevise {
 			help += "  r: revise"
 		}
@@ -299,7 +289,7 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 		}
 		help += "  g: guidance  b: breakpoints  q/esc: back"
 	} else {
-		help = "j/k: iterations  enter: focus output  a: attach  s: start  D: diagnose  x: stop"
+		help = "j/k: iterations  enter: focus output  a: attach  s: start  D: diagnose"
 		if canRevise {
 			help += "  r: revise"
 		}
@@ -474,12 +464,11 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 	return b.String()
 }
 
-func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFocused bool, beadCursor int) (string, int) {
+func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFocused bool, beadCursor int) string {
 	if cursor < 0 || cursor >= len(snaps) {
-		return "", -1
+		return ""
 	}
 	snap := snaps[cursor]
-	beadsLine := -1
 
 	var b strings.Builder
 	hr := helpStyle.Render(strings.Repeat("─", width))
@@ -526,7 +515,6 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFo
 	}
 
 	if len(snap.BeadsClosed) > 0 || len(snap.BeadsOpened) > 0 {
-		beadsLine = strings.Count(b.String(), "\n")
 		b.WriteString("\n" + hr + "\n")
 	}
 
@@ -579,7 +567,7 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFo
 		b.WriteString(renderErrorBlock(snap.Error))
 	}
 
-	return b.String(), beadsLine
+	return b.String()
 }
 
 // colorizeDiffStat renders +/- characters in diff stat lines with green/red.
