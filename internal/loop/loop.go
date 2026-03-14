@@ -366,6 +366,11 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			BeadsOpened:      beadsOpened,
 		}
 
+		// Log refinement cap reached (once per phase).
+		if iteration == convCfg.RefinementCap {
+			slog.Info("refinement cap reached", "stream", s.ID, "phase", phase.Name(), "iteration", iteration)
+		}
+
 		// Post-review filter: classify newly filed issues by tier and label advisory ones.
 		var converged bool
 		if len(beadsOpened) > 0 {
@@ -425,6 +430,30 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			fallbackModel = s.GetFallback().Model
 		}
 
+		// Build convergence snapshot data.
+		var snapConvergence *stream.SnapshotConvergence
+		if tracker := s.GetSectionTracker(); tracker != nil {
+			sc := &stream.SnapshotConvergence{
+				Mode:                 convCfg.Mode.String(),
+				RefinementCapReached: iteration >= convCfg.RefinementCap,
+				Sections:             make(map[string]stream.SnapshotSection),
+			}
+			for id, state := range tracker.Sections {
+				ss := stream.SnapshotSection{
+					RevisionCount: len(state.Revisions),
+					Frozen:        state.FrozenAt != nil,
+				}
+				if state.FrozenAt != nil {
+					ss.FrozenAtIter = *state.FrozenAt
+				}
+				if len(state.Revisions) > 0 {
+					ss.LastEditType = state.Revisions[len(state.Revisions)-1].Type.String()
+				}
+				sc.Sections[id] = ss
+			}
+			snapConvergence = sc
+		}
+
 		snap := stream.Snapshot{
 			Phase:            phase.Name(),
 			Iteration:        iteration,
@@ -443,6 +472,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			GuidanceConsumed: pendingGuidance,
 			UsedFallback:     usedFallback,
 			FallbackModel:    fallbackModel,
+			Convergence:      snapConvergence,
 			Timestamp:        time.Now(),
 		}
 		s.AppendSnapshot(snap)

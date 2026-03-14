@@ -491,6 +491,15 @@ func detailTopBar(st *stream.Stream, width int) string {
 	phase := currentPhase(st)
 	iter := fmt.Sprintf("iter %d", st.GetIteration())
 	suffix := phase + " · " + iter
+
+	// Add convergence summary if section tracker has data.
+	if tracker := st.GetSectionTracker(); tracker != nil && len(tracker.Sections) > 0 {
+		frozen := tracker.FrozenSections()
+		if len(frozen) > 0 {
+			suffix += fmt.Sprintf(" · %d frozen", len(frozen))
+		}
+	}
+
 	// "Streams › " = 10 visual, suffix + spacing = len+4, padding = 2
 	nameMax := width - 10 - len(suffix) - 4 - 2
 	if nameMax < 10 {
