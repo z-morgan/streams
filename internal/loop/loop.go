@@ -104,6 +104,7 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 
 		iteration := s.GetIteration()
+		usedFallback := false
 
 		// Fetch ordered steps for prompt injection.
 		steps, err := beads.FetchOrderedSteps(s.BeadsParentID)
@@ -157,9 +158,30 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				return
 			}
 			kind := classifyError(err)
+			if kind == stream.ErrRateLimit {
+				fb := s.GetFallback()
+				if fb.Enabled && fb.Model != "" {
+					s.AppendOutput(fmt.Sprintf("[streams] Rate limit hit — falling back to %s", fb.Model))
+					slog.Info("rate limit fallback", "stream", s.ID, "fallbackModel", fb.Model)
+					fbReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort(), fb.Model, mcpConfigPath, mcpToolPatterns)
+					fbReq.OnOutput = func(line string) { s.AppendOutput(line) }
+					implResp, err = rt.Run(ctx, fbReq)
+					if err != nil {
+						if ctx.Err() != nil {
+							s.SetStatus(stream.StatusStopped)
+							return
+						}
+						recordError(s, phase, classifyError(err), stream.StepImplement, "fallback model also failed", err.Error())
+						return
+					}
+					usedFallback = true
+					goto implSucceeded
+				}
+			}
 			recordError(s, phase, kind, stream.StepImplement, "implement step failed", err.Error())
 			return
 		}
+	implSucceeded:
 
 		if implResp.SessionID != "" {
 			s.SetSessionID(implResp.SessionID)
@@ -254,9 +276,30 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 						return
 					}
 					kind := classifyError(err)
+					if kind == stream.ErrRateLimit {
+						fb := s.GetFallback()
+						if fb.Enabled && fb.Model != "" {
+							s.AppendOutput(fmt.Sprintf("[streams] Rate limit hit — falling back to %s", fb.Model))
+							slog.Info("rate limit fallback (review)", "stream", s.ID, "fallbackModel", fb.Model)
+							fbReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort(), fb.Model, mcpConfigPath, mcpToolPatterns)
+							fbReq.OnOutput = func(line string) { s.AppendOutput(line) }
+							reviewResp, err = rt.Run(ctx, fbReq)
+							if err != nil {
+								if ctx.Err() != nil {
+									s.SetStatus(stream.StatusStopped)
+									return
+								}
+								recordError(s, phase, classifyError(err), stream.StepReview, "fallback model also failed", err.Error())
+								return
+							}
+							usedFallback = true
+							goto reviewSucceeded
+						}
+					}
 					recordError(s, phase, kind, stream.StepReview, "review step failed", err.Error())
 					return
 				}
+			reviewSucceeded:
 			}
 
 			idsAfterReview, err = beads.ListOpenChildren(s.BeadsParentID)
@@ -300,6 +343,11 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 
 		reviseFrom, reviseFeedback := s.DrainReviseContext()
 
+		var fallbackModel string
+		if usedFallback {
+			fallbackModel = s.GetFallback().Model
+		}
+
 		snap := stream.Snapshot{
 			Phase:            phase.Name(),
 			Iteration:        iteration,
@@ -316,6 +364,8 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			ReviseFeedback:   reviseFeedback,
 			AutosquashErr:    autosquashErr,
 			GuidanceConsumed: pendingGuidance,
+			UsedFallback:     usedFallback,
+			FallbackModel:    fallbackModel,
 			Timestamp:        time.Now(),
 		}
 		s.AppendSnapshot(snap)
