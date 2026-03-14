@@ -160,6 +160,9 @@ var (
 			Bold(true).
 			Foreground(colorPrimary)
 
+	greenStyle = lipgloss.NewStyle().
+			Foreground(colorSuccess)
+
 	// Spinner frames — braille dots cycle, similar to Claude Code's thinking indicator.
 	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )

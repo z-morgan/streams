@@ -114,9 +114,9 @@ type Model struct {
 	modelFetcher *models.Fetcher
 	width        int
 	height       int
-	view      view
-	dashboard dashboardView
-	detail    detailView
+	view         view
+	dashboard    dashboardView
+	detail       detailView
 
 	// The currently selected stream ID (set when entering detail view).
 	selectedID string
@@ -126,20 +126,20 @@ type Model struct {
 	guidanceInput textarea.Model
 
 	// New stream overlay state.
-	showNewStream        bool
-	newStreamTitle       textarea.Model
-	newStreamInput       textarea.Model
-	newStreamStep        int                    // 0 = title, 1 = task, 2 = phases, 3 = models, 4 = breakpoints
-	newStreamPhaseCur    int                    // cursor into flattened phase list
-	newStreamChecked     map[string]bool        // which phases are checked
-	newStreamModelCursor int                    // cursor into model list
-	newStreamModels      stream.ModelConfig     // selected model config
-	newStreamPerPhase    bool                   // per-phase model selection mode
-	newStreamPhaseModelCursor int               // which phase row is focused (per-phase mode)
-	newStreamBreakpoints map[int]bool           // which pipeline gaps have breakpoints
-	newStreamBPCursor    int                    // cursor into breakpoint gaps
-	newStreamNotify      stream.NotifySettings  // notification toggles
-	creating             bool                   // true while orch.Create is running
+	showNewStream             bool
+	newStreamTitle            textarea.Model
+	newStreamInput            textarea.Model
+	newStreamStep             int                   // 0 = title, 1 = task, 2 = phases, 3 = models, 4 = breakpoints
+	newStreamPhaseCur         int                   // cursor into flattened phase list
+	newStreamChecked          map[string]bool       // which phases are checked
+	newStreamModelCursor      int                   // cursor into model list
+	newStreamModels           stream.ModelConfig    // selected model config
+	newStreamPerPhase         bool                  // per-phase model selection mode
+	newStreamPhaseModelCursor int                   // which phase row is focused (per-phase mode)
+	newStreamBreakpoints      map[int]bool          // which pipeline gaps have breakpoints
+	newStreamBPCursor         int                   // cursor into breakpoint gaps
+	newStreamNotify           stream.NotifySettings // notification toggles
+	creating                  bool                  // true while orch.Create is running
 
 	// Quit confirmation overlay state.
 	showQuitConfirm bool
@@ -159,14 +159,14 @@ type Model struct {
 
 	// Stream config overlay state (replaces edit breakpoints).
 	showStreamConfig     bool
-	streamConfigTab      int                    // 0=breakpoints, 1=models
-	editBPMap            map[int]bool           // which pipeline gaps have breakpoints
-	editBPCursor         int                    // cursor into breakpoint gaps
+	streamConfigTab      int          // 0=breakpoints, 1=models
+	editBPMap            map[int]bool // which pipeline gaps have breakpoints
+	editBPCursor         int          // cursor into breakpoint gaps
 	editBPNotify         stream.NotifySettings
-	editModelConfig      stream.ModelConfig     // model editing state
-	editModelCursor      int                    // cursor into model list
-	editPerPhase         bool                   // per-phase mode
-	editPhaseModelCursor int                    // which phase row is focused
+	editModelConfig      stream.ModelConfig // model editing state
+	editModelCursor      int                // cursor into model list
+	editPerPhase         bool               // per-phase mode
+	editPhaseModelCursor int                // which phase row is focused
 
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
@@ -242,7 +242,6 @@ type streamRevisedMsg struct {
 type forceAdvancedMsg struct {
 	err error
 }
-
 
 type beadShowMsg struct {
 	output string
@@ -481,7 +480,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
-
 
 	case beadShowMsg:
 		m.detail.beadShowOutput = msg.output
@@ -1862,7 +1860,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.AllOptions(), m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -1885,7 +1883,7 @@ func (m Model) viewString() string {
 	if m.showStreamConfig {
 		st := m.orch.Get(m.selectedID)
 		if st != nil {
-			return renderStreamConfigOverlay(st.GetPipeline(), m.streamConfigTab, m.editBPMap, m.editBPCursor, m.editBPNotify, m.editModelConfig, m.editModelCursor, m.editPerPhase, m.editPhaseModelCursor, m.modelFetcher.AllOptions(), m.width, m.height)
+			return renderStreamConfigOverlay(st.GetPipeline(), m.streamConfigTab, m.editBPMap, m.editBPCursor, m.editBPNotify, m.editModelConfig, m.editModelCursor, m.editPerPhase, m.editPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.width, m.height)
 		}
 	}
 
@@ -1978,7 +1976,7 @@ func (m Model) viewString() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelOptions []string, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
 	var overlay string
 
 	totalSteps := 4
@@ -2032,26 +2030,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 			if selected == "" {
 				selected = "default"
 			}
-			for i, opt := range modelOptions {
-				cursor := "  "
-				if i == modelCursor {
-					cursor = cursorStyle.Render("> ")
-				}
-				radio := "○"
-				if opt == selected {
-					radio = "●"
-				}
-				label := opt
-				if opt == "default" {
-					label += " (CLI default)"
-				}
-				if i == modelCursor {
-					label = selectedRowStyle.Render(radio + " " + label)
-				} else {
-					label = radio + " " + label
-				}
-				overlay += cursor + label + "\n"
-			}
+			overlay += renderGroupedModelList(modelSections, ollamaRunning, selected, modelCursor)
 			overlay += "\n"
 			perPhaseCheck := "[ ]"
 			overlay += "  " + perPhaseCheck + " Configure per phase\n"
@@ -2123,7 +2102,7 @@ func renderNotifyToggles(notify stream.NotifySettings) string {
 	return helpStyle.Render(fmt.Sprintf("  Notify: 1 %s bell  2 %s flash  3 %s system", dot(notify.Bell), dot(notify.Flash), dot(notify.System)))
 }
 
-func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, modelConfig stream.ModelConfig, modelCursor int, perPhase bool, phaseModelCursor int, modelOptions []string, width, height int) string {
+func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, modelConfig stream.ModelConfig, modelCursor int, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, width, height int) string {
 	// Tab header.
 	bpTab := "Breakpoints"
 	modelsTab := "Models"
@@ -2184,26 +2163,7 @@ func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map
 			if selected == "" {
 				selected = "default"
 			}
-			for i, opt := range modelOptions {
-				cursor := "  "
-				if i == modelCursor {
-					cursor = cursorStyle.Render("> ")
-				}
-				radio := "○"
-				if opt == selected {
-					radio = "●"
-				}
-				label := opt
-				if opt == "default" {
-					label += " (CLI default)"
-				}
-				if i == modelCursor {
-					label = selectedRowStyle.Render(radio + " " + label)
-				} else {
-					label = radio + " " + label
-				}
-				overlay += cursor + label + "\n"
-			}
+			overlay += renderGroupedModelList(modelSections, ollamaRunning, selected, modelCursor)
 			overlay += "\n  [ ] Configure per phase\n"
 			overlay += "\n" + helpStyle.Render("tab: switch section  j/k: navigate  space: select  p: per-phase  enter: save  esc: cancel")
 		}
@@ -2211,6 +2171,46 @@ func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map
 
 	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderGroupedModelList renders model options grouped by section with headers.
+// The cursor indexes into the flat selectable list across all sections.
+func renderGroupedModelList(sections []models.Section, ollamaRunning bool, selected string, cursor int) string {
+	var b strings.Builder
+	idx := 0
+	for _, sec := range sections {
+		header := sec.Header
+		if sec.Header == "Local (Ollama)" {
+			if ollamaRunning {
+				header += " " + greenStyle.Render("● running")
+			} else {
+				header += " " + helpStyle.Render("○ not running")
+			}
+		}
+		b.WriteString("  " + helpStyle.Render(header) + "\n")
+		for _, opt := range sec.Items {
+			cur := "  "
+			if idx == cursor {
+				cur = cursorStyle.Render("> ")
+			}
+			radio := "○"
+			if opt == selected {
+				radio = "●"
+			}
+			label := opt
+			if opt == "default" {
+				label += " (CLI default)"
+			}
+			if idx == cursor {
+				label = selectedRowStyle.Render(radio + " " + label)
+			} else {
+				label = radio + " " + label
+			}
+			b.WriteString(cur + label + "\n")
+			idx++
+		}
+	}
+	return b.String()
 }
 
 func renderBeadsInitOverlay(width, height int) string {

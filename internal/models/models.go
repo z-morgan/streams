@@ -114,6 +114,36 @@ func (f *Fetcher) OllamaRunning() bool {
 	return ollama.IsRunning()
 }
 
+// Section represents a group of model options under a header.
+type Section struct {
+	Header string
+	Items  []string
+}
+
+// Sections returns model options grouped into Aliases, Anthropic API, and Local (Ollama) sections.
+// Only non-empty sections are returned.
+func (f *Fetcher) Sections() []Section {
+	var sections []Section
+
+	sections = append(sections, Section{Header: "Aliases", Items: Aliases})
+
+	apiModels := f.Models()
+	if len(apiModels) > 0 {
+		items := make([]string, len(apiModels))
+		for i, m := range apiModels {
+			items[i] = m.ID
+		}
+		sections = append(sections, Section{Header: "Anthropic API", Items: items})
+	}
+
+	ollamaOpts := f.OllamaOptions()
+	if len(ollamaOpts) > 0 {
+		sections = append(sections, Section{Header: "Local (Ollama)", Items: ollamaOpts})
+	}
+
+	return sections
+}
+
 // apiResponse matches the Anthropic /v1/models response shape.
 type apiResponse struct {
 	Data []struct {
