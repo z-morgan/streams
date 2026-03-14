@@ -451,8 +451,14 @@ Use the chrome-devtools MCP tool to open pages, inspect elements, and verify you
 }
 
 func classifyError(err error) stream.ErrorKind {
-	if strings.Contains(strings.ToLower(err.Error()), "budget") {
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "budget") {
 		return stream.ErrBudget
+	}
+	for _, s := range []string{"rate limit", "rate_limit", "429", "overloaded", "too many requests", "usage limit"} {
+		if strings.Contains(msg, s) {
+			return stream.ErrRateLimit
+		}
 	}
 	return stream.ErrRuntime
 }

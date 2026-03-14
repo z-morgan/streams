@@ -57,6 +57,7 @@ For beads operations (close/create), describe what you intend to do and confirm 
 - Compare the task description against what the agent actually did (summaries) — divergence suggests the implement prompt doesn't ground the agent well enough
 - If the agent hit MaxIterations, check whether the review prompt's convergence bar is too high
 - Autosquash errors indicate messy commit history — the coding-implement prompt may need instructions about commit hygiene
+- RateLimit errors mean the API returned 429 or a usage cap message — check if a fallback model is configured, or suggest reducing iteration frequency
 
 ## Working Directory
 

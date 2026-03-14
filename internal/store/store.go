@@ -20,31 +20,32 @@ type Store struct {
 
 // streamData is the JSON-serializable form of a stream.
 type streamData struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Task          string    `json:"task"`
-	Mode          string    `json:"mode"`
-	Status        string    `json:"status"`
-	Pipeline      []string  `json:"pipeline"`
-	PipelineIndex int       `json:"pipeline_index"`
-	Breakpoints   []int    `json:"breakpoints,omitempty"`
-	IterStep      string    `json:"iter_step"`
-	Iteration     int       `json:"iteration"`
-	Converged     bool      `json:"converged"`
-	BeadsParentID string    `json:"beads_parent_id"`
-	BaseSHA       string    `json:"base_sha"`
-	Branch        string    `json:"branch"`
-	WorkTree      string    `json:"worktree"`
-	MCPConfigPath   string        `json:"mcp_config_path,omitempty"`
-	EnvironmentPort int           `json:"environment_port,omitempty"`
-	SessionID     string          `json:"session_id,omitempty"`
-	Models        *modelConfigData `json:"models,omitempty"`
-	Notify        *notifyData     `json:"notify,omitempty"`
-	LastError     *errData        `json:"last_error,omitempty"`
-	PendingRevise *pendingReviseData `json:"pending_revise,omitempty"`
-	Guidance      []guidanceData    `json:"guidance,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
+	Task            string             `json:"task"`
+	Mode            string             `json:"mode"`
+	Status          string             `json:"status"`
+	Pipeline        []string           `json:"pipeline"`
+	PipelineIndex   int                `json:"pipeline_index"`
+	Breakpoints     []int              `json:"breakpoints,omitempty"`
+	IterStep        string             `json:"iter_step"`
+	Iteration       int                `json:"iteration"`
+	Converged       bool               `json:"converged"`
+	BeadsParentID   string             `json:"beads_parent_id"`
+	BaseSHA         string             `json:"base_sha"`
+	Branch          string             `json:"branch"`
+	WorkTree        string             `json:"worktree"`
+	MCPConfigPath   string             `json:"mcp_config_path,omitempty"`
+	EnvironmentPort int                `json:"environment_port,omitempty"`
+	SessionID       string             `json:"session_id,omitempty"`
+	Models          *modelConfigData   `json:"models,omitempty"`
+	Fallback        *fallbackData      `json:"fallback,omitempty"`
+	Notify          *notifyData        `json:"notify,omitempty"`
+	LastError       *errData           `json:"last_error,omitempty"`
+	PendingRevise   *pendingReviseData `json:"pending_revise,omitempty"`
+	Guidance        []guidanceData     `json:"guidance,omitempty"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
 type pendingReviseData struct {
@@ -60,6 +61,11 @@ type guidanceData struct {
 type modelConfigData struct {
 	Default  string            `json:"default,omitempty"`
 	PerPhase map[string]string `json:"per_phase,omitempty"`
+}
+
+type fallbackData struct {
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model,omitempty"`
 }
 
 type notifyData struct {
@@ -202,30 +208,34 @@ func (s *Store) Load(id string) (*stream.Stream, error) {
 
 func toStreamData(st *stream.Stream) streamData {
 	d := streamData{
-		ID:            st.ID,
-		Name:          st.Name,
-		Task:          st.Task,
-		Mode:          st.Mode.String(),
-		Status:        st.GetStatus().String(),
-		Pipeline:      st.Pipeline,
-		PipelineIndex: st.PipelineIndex,
-		Breakpoints:   st.Breakpoints,
-		IterStep:      st.IterStep.String(),
-		Iteration:     st.GetIteration(),
-		Converged:     st.Converged,
-		BeadsParentID: st.BeadsParentID,
+		ID:              st.ID,
+		Name:            st.Name,
+		Task:            st.Task,
+		Mode:            st.Mode.String(),
+		Status:          st.GetStatus().String(),
+		Pipeline:        st.Pipeline,
+		PipelineIndex:   st.PipelineIndex,
+		Breakpoints:     st.Breakpoints,
+		IterStep:        st.IterStep.String(),
+		Iteration:       st.GetIteration(),
+		Converged:       st.Converged,
+		BeadsParentID:   st.BeadsParentID,
 		MCPConfigPath:   st.GetMCPConfigPath(),
 		EnvironmentPort: st.GetEnvironmentPort(),
-		SessionID:     st.GetSessionID(),
-		BaseSHA:       st.BaseSHA,
-		Branch:        st.Branch,
-		WorkTree:      st.WorkTree,
-		CreatedAt:     st.CreatedAt,
-		UpdatedAt:     st.UpdatedAt,
+		SessionID:       st.GetSessionID(),
+		BaseSHA:         st.BaseSHA,
+		Branch:          st.Branch,
+		WorkTree:        st.WorkTree,
+		CreatedAt:       st.CreatedAt,
+		UpdatedAt:       st.UpdatedAt,
 	}
 	mc := st.GetModels()
 	if mc.Default != "" || len(mc.PerPhase) > 0 {
 		d.Models = &modelConfigData{Default: mc.Default, PerPhase: mc.PerPhase}
+	}
+	fc := st.GetFallback()
+	if fc.Enabled || fc.Model != "" {
+		d.Fallback = &fallbackData{Enabled: fc.Enabled, Model: fc.Model}
 	}
 	n := st.GetNotify()
 	if n.Bell || n.Flash || n.System {
@@ -257,24 +267,24 @@ func toStreamData(st *stream.Stream) streamData {
 
 func fromStreamData(d streamData) *stream.Stream {
 	st := &stream.Stream{
-		ID:            d.ID,
-		Name:          d.Name,
-		Task:          d.Task,
-		Mode:          parseMode(d.Mode),
-		Pipeline:      d.Pipeline,
-		PipelineIndex: d.PipelineIndex,
-		Breakpoints:   d.Breakpoints,
-		IterStep:      parseIterStep(d.IterStep),
-		Converged:     d.Converged,
-		BeadsParentID: d.BeadsParentID,
+		ID:              d.ID,
+		Name:            d.Name,
+		Task:            d.Task,
+		Mode:            parseMode(d.Mode),
+		Pipeline:        d.Pipeline,
+		PipelineIndex:   d.PipelineIndex,
+		Breakpoints:     d.Breakpoints,
+		IterStep:        parseIterStep(d.IterStep),
+		Converged:       d.Converged,
+		BeadsParentID:   d.BeadsParentID,
 		MCPConfigPath:   d.MCPConfigPath,
 		EnvironmentPort: d.EnvironmentPort,
-		SessionID:     d.SessionID,
-		BaseSHA:       d.BaseSHA,
-		Branch:        d.Branch,
-		WorkTree:      d.WorkTree,
-		CreatedAt:     d.CreatedAt,
-		UpdatedAt:     d.UpdatedAt,
+		SessionID:       d.SessionID,
+		BaseSHA:         d.BaseSHA,
+		Branch:          d.Branch,
+		WorkTree:        d.WorkTree,
+		CreatedAt:       d.CreatedAt,
+		UpdatedAt:       d.UpdatedAt,
 	}
 	st.SetStatus(parseStatus(d.Status))
 	st.SetIteration(d.Iteration)
@@ -303,6 +313,12 @@ func fromStreamData(d streamData) *stream.Stream {
 		st.Models = stream.ModelConfig{
 			Default:  d.Models.Default,
 			PerPhase: d.Models.PerPhase,
+		}
+	}
+	if d.Fallback != nil {
+		st.Fallback = stream.FallbackConfig{
+			Enabled: d.Fallback.Enabled,
+			Model:   d.Fallback.Model,
 		}
 	}
 	if d.Notify != nil {
@@ -362,6 +378,10 @@ func parseErrorKind(s string) stream.ErrorKind {
 		return stream.ErrNoProgress
 	case "Infra":
 		return stream.ErrInfra
+	case "MaxIterations":
+		return stream.ErrMaxIterations
+	case "RateLimit":
+		return stream.ErrRateLimit
 	default:
 		return stream.ErrRuntime
 	}

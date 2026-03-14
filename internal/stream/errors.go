@@ -7,11 +7,12 @@ type ErrorKind int
 
 const (
 	ErrRuntime       ErrorKind = iota // CLI exited non-zero (crash, timeout)
-	ErrBudget                        // Budget limit hit
-	ErrAutosquash                    // git rebase --autosquash failed (merge conflict)
-	ErrNoProgress                    // Implement step closed zero beads
-	ErrInfra                         // Disk, git worktree, beads CLI failure
-	ErrMaxIterations                 // Iteration limit reached
+	ErrBudget                         // Budget limit hit
+	ErrAutosquash                     // git rebase --autosquash failed (merge conflict)
+	ErrNoProgress                     // Implement step closed zero beads
+	ErrInfra                          // Disk, git worktree, beads CLI failure
+	ErrMaxIterations                  // Iteration limit reached
+	ErrRateLimit                      // API rate limit or usage cap hit
 )
 
 var errorKindNames = [...]string{
@@ -21,6 +22,7 @@ var errorKindNames = [...]string{
 	"NoProgress",
 	"Infra",
 	"MaxIterations",
+	"RateLimit",
 }
 
 func (k ErrorKind) String() string {
