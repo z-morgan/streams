@@ -309,14 +309,20 @@ func formatToolUse(name string, input json.RawMessage) string {
 	return "> " + name
 }
 
-// appendOllamaEnv sets ANTHROPIC_BASE_URL to route requests to the local Ollama
-// server when the model has an ollama: prefix. Returns the env unchanged otherwise.
+// appendOllamaEnv configures the subprocess environment to route requests to
+// the local Ollama server when the model has an ollama: prefix. Ollama v0.14.0+
+// implements the Anthropic Messages API, so Claude Code talks to it natively.
 func appendOllamaEnv(env []string, req runtime.Request) []string {
 	model := req.Options["model"]
 	if !strings.HasPrefix(model, "ollama:") {
 		return env
 	}
-	return append(env, "ANTHROPIC_BASE_URL=http://localhost:11434")
+	env = append(env,
+		"ANTHROPIC_BASE_URL=http://localhost:11434",
+		"ANTHROPIC_AUTH_TOKEN=ollama",
+		"ANTHROPIC_API_KEY=",
+	)
+	return env
 }
 
 // appendEnvWithout returns os environ with the named variable removed, plus
