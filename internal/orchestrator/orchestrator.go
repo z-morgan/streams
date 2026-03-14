@@ -745,6 +745,11 @@ func (o *Orchestrator) TeardownEnvironments() {
 	}
 }
 
+// EnvironmentConfigured returns true if the project has an environment config.
+func (o *Orchestrator) EnvironmentConfigured() bool {
+	return o.envManager != nil && o.envManager.Enabled()
+}
+
 // EnvManager returns the environment manager, or nil if environments are not configured.
 func (o *Orchestrator) EnvManager() *environment.Manager {
 	return o.envManager

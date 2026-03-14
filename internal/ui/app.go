@@ -157,11 +157,16 @@ type Model struct {
 	pendingNotify      stream.NotifySettings // notify settings stashed while waiting for stealth answer
 	pendingModels      stream.ModelConfig    // model config stashed while waiting for stealth answer
 
-	// Edit breakpoints overlay state.
-	showEditBreakpoints bool
-	editBPMap           map[int]bool // which pipeline gaps have breakpoints
-	editBPCursor        int          // cursor into breakpoint gaps
-	editBPNotify        stream.NotifySettings
+	// Stream config overlay state (replaces edit breakpoints).
+	showStreamConfig     bool
+	streamConfigTab      int                    // 0=breakpoints, 1=models
+	editBPMap            map[int]bool           // which pipeline gaps have breakpoints
+	editBPCursor         int                    // cursor into breakpoint gaps
+	editBPNotify         stream.NotifySettings
+	editModelConfig      stream.ModelConfig     // model editing state
+	editModelCursor      int                    // cursor into model list
+	editPerPhase         bool                   // per-phase mode
+	editPhaseModelCursor int                    // which phase row is focused
 
 	// Converge confirmation overlay state.
 	showConvergeConfirm bool
@@ -367,8 +372,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle edit breakpoints overlay if active.
-	if m.showEditBreakpoints {
-		return m.updateEditBreakpoints(msg)
+	if m.showStreamConfig {
+		return m.updateStreamConfig(msg)
 	}
 
 	// Handle complete overlay if active.
@@ -743,7 +748,13 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.editBPMap = bpMap
 				m.editBPCursor = 0
 				m.editBPNotify = st.GetNotify()
-				m.showEditBreakpoints = true
+				mc := st.GetModels()
+				m.editModelConfig = mc
+				m.editModelCursor = 0
+				m.editPerPhase = len(mc.PerPhase) > 0
+				m.editPhaseModelCursor = 0
+				m.streamConfigTab = 0
+				m.showStreamConfig = true
 				return m, nil
 			}
 		}
@@ -1327,49 +1338,28 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateEditBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) updateStreamConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	st := m.orch.Get(m.selectedID)
 	if st == nil {
-		m.showEditBreakpoints = false
+		m.showStreamConfig = false
 		return m, nil
 	}
-	pipeline := st.GetPipeline()
-	gapCount := len(pipeline) - 1
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
-			m.showEditBreakpoints = false
+			m.showStreamConfig = false
 			return m, nil
 
-		case "j", "down":
-			if m.editBPCursor < gapCount-1 {
-				m.editBPCursor++
-			}
-			return m, nil
-
-		case "k", "up":
-			if m.editBPCursor > 0 {
-				m.editBPCursor--
-			}
-			return m, nil
-
-		case "space":
-			m.editBPMap[m.editBPCursor] = !m.editBPMap[m.editBPCursor]
-			return m, nil
-
-		case "1":
-			m.editBPNotify.Bell = !m.editBPNotify.Bell
-			return m, nil
-		case "2":
-			m.editBPNotify.Flash = !m.editBPNotify.Flash
-			return m, nil
-		case "3":
-			m.editBPNotify.System = !m.editBPNotify.System
+		case "tab":
+			m.streamConfigTab = 1 - m.streamConfigTab // toggle 0↔1
 			return m, nil
 
 		case "enter":
+			// Save both breakpoints and models.
+			pipeline := st.GetPipeline()
+			gapCount := len(pipeline) - 1
 			var breakpoints []int
 			for i := 0; i < gapCount; i++ {
 				if m.editBPMap[i] {
@@ -1378,9 +1368,127 @@ func (m Model) updateEditBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			st.SetBreakpoints(breakpoints)
 			st.SetNotify(m.editBPNotify)
-			m.showEditBreakpoints = false
+			if m.editPerPhase {
+				m.editModelConfig.Default = ""
+			}
+			st.SetModels(m.editModelConfig)
+			m.showStreamConfig = false
 			return m, nil
+
+		default:
+			if m.streamConfigTab == 0 {
+				return m.updateStreamConfigBreakpoints(msg)
+			}
+			return m.updateStreamConfigModels(msg)
 		}
+	}
+
+	return m, nil
+}
+
+func (m Model) updateStreamConfigBreakpoints(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	st := m.orch.Get(m.selectedID)
+	if st == nil {
+		return m, nil
+	}
+	pipeline := st.GetPipeline()
+	gapCount := len(pipeline) - 1
+
+	switch msg.String() {
+	case "j", "down":
+		if m.editBPCursor < gapCount-1 {
+			m.editBPCursor++
+		}
+	case "k", "up":
+		if m.editBPCursor > 0 {
+			m.editBPCursor--
+		}
+	case "space":
+		m.editBPMap[m.editBPCursor] = !m.editBPMap[m.editBPCursor]
+	case "1":
+		m.editBPNotify.Bell = !m.editBPNotify.Bell
+	case "2":
+		m.editBPNotify.Flash = !m.editBPNotify.Flash
+	case "3":
+		m.editBPNotify.System = !m.editBPNotify.System
+	}
+
+	return m, nil
+}
+
+func (m Model) updateStreamConfigModels(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	st := m.orch.Get(m.selectedID)
+	if st == nil {
+		return m, nil
+	}
+	modelOptions := m.modelFetcher.AllOptions()
+	pipeline := st.GetPipeline()
+
+	switch msg.String() {
+	case "j", "down":
+		if m.editPerPhase {
+			if m.editPhaseModelCursor < len(pipeline)-1 {
+				m.editPhaseModelCursor++
+			}
+		} else {
+			if m.editModelCursor < len(modelOptions)-1 {
+				m.editModelCursor++
+			}
+		}
+	case "k", "up":
+		if m.editPerPhase {
+			if m.editPhaseModelCursor > 0 {
+				m.editPhaseModelCursor--
+			}
+		} else {
+			if m.editModelCursor > 0 {
+				m.editModelCursor--
+			}
+		}
+	case "space":
+		if !m.editPerPhase {
+			if m.editModelCursor >= 0 && m.editModelCursor < len(modelOptions) {
+				m.editModelConfig.Default = modelOptions[m.editModelCursor]
+			}
+		} else {
+			// Toggle per-phase off
+			m.editPerPhase = false
+		}
+	case "h", "left":
+		if m.editPerPhase && len(pipeline) > 0 {
+			phaseName := pipeline[m.editPhaseModelCursor]
+			if m.editModelConfig.PerPhase == nil {
+				m.editModelConfig.PerPhase = make(map[string]string)
+			}
+			current := m.editModelConfig.PerPhase[phaseName]
+			idx := modelOptionIndex(modelOptions, current)
+			idx--
+			if idx < 0 {
+				idx = len(modelOptions) - 1
+			}
+			m.editModelConfig.PerPhase[phaseName] = modelOptions[idx]
+		}
+	case "l", "right":
+		if m.editPerPhase && len(pipeline) > 0 {
+			phaseName := pipeline[m.editPhaseModelCursor]
+			if m.editModelConfig.PerPhase == nil {
+				m.editModelConfig.PerPhase = make(map[string]string)
+			}
+			current := m.editModelConfig.PerPhase[phaseName]
+			idx := modelOptionIndex(modelOptions, current)
+			idx++
+			if idx >= len(modelOptions) {
+				idx = 0
+			}
+			m.editModelConfig.PerPhase[phaseName] = modelOptions[idx]
+		}
+	case "p":
+		// Toggle per-phase mode
+		m.editPerPhase = !m.editPerPhase
+		if m.editPerPhase && m.editModelConfig.PerPhase == nil {
+			m.editModelConfig.PerPhase = make(map[string]string)
+		}
+		m.editPhaseModelCursor = 0
 	}
 
 	return m, nil
@@ -1774,10 +1882,10 @@ func (m Model) viewString() string {
 		return renderForceAdvanceOverlay(nextPhase, m.width, m.height)
 	}
 
-	if m.showEditBreakpoints {
+	if m.showStreamConfig {
 		st := m.orch.Get(m.selectedID)
 		if st != nil {
-			return renderEditBreakpointsOverlay(st.GetPipeline(), m.editBPMap, m.editBPCursor, m.editBPNotify, m.width, m.height)
+			return renderStreamConfigOverlay(st.GetPipeline(), m.streamConfigTab, m.editBPMap, m.editBPCursor, m.editBPNotify, m.editModelConfig, m.editModelCursor, m.editPerPhase, m.editPhaseModelCursor, m.modelFetcher.AllOptions(), m.width, m.height)
 		}
 	}
 
@@ -1830,6 +1938,9 @@ func (m Model) viewString() string {
 		}
 		if m.statusMsg != "" {
 			statusLine = m.statusMsg
+		}
+		if statusLine == "" && !m.orch.EnvironmentConfigured() {
+			statusLine = helpStyle.Render("No environment configured. Run `streams init` to set up Docker Compose.")
 		}
 
 		helpText := dashboardChannelHelp
