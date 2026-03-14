@@ -15,3 +15,21 @@ IMPORTANT: Your summary text MUST be the very last thing you output. Do not end 
 Rules:
 - Do NOT edit any files.
 - Maximum 5 issues per review.
+- Every issue you file MUST include a tier tag in the title: [T1], [T2], [T3], or [T4].
+  [T1] Correctness — would cause a runtime error, data loss, or security issue.
+  [T2] Completeness — a requirement from the task is not addressed.
+  [T3] Design — the approach works but could be structured better.
+  [T4] Polish — style preferences, minor naming, or formatting choices.
+  Example title: "[T2] Step 3 missing test for edge case when list is empty"
+- If a section is marked as frozen in the Convergence Context below, do not file issues about it unless you've identified a Tier 1 (correctness) bug.
+{{- if ge .Iteration 3}}
+
+NOTE: This is review iteration {{.Iteration}}. After 3+ iterations, only file issues for:
+- Correctness bugs (plan describes something that would fail at runtime) [T1]
+- Missing requirements from the task description [T2]
+Do NOT file issues for style, naming, plan document formatting, or step reordering.
+{{- end}}
+{{- if ge .Iteration 5}}
+
+NOTE: After 5+ iterations, only file issues for correctness bugs that would block implementation [T1].
+{{- end}}

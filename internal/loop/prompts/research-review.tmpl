@@ -16,3 +16,21 @@ IMPORTANT: Your summary text MUST be the very last thing you output. Do not end 
 Rules:
 - Do NOT edit any files.
 - Maximum 5 issues per review.
+- Every issue you file MUST include a tier tag in the title: [T1], [T2], [T3], or [T4].
+  [T1] Correctness — research contains factual errors that would lead to wrong implementation.
+  [T2] Completeness — a required area of research is missing or too shallow.
+  [T3] Design — the research is adequate but could be better organized or more thorough.
+  [T4] Polish — minor formatting, wording, or organizational preferences.
+  Example title: "[T2] Missing research on authentication middleware chain"
+- If a section is marked as frozen in the Convergence Context below, do not file issues about it unless you've identified a Tier 1 (correctness) bug.
+{{- if ge .Iteration 3}}
+
+NOTE: This is review iteration {{.Iteration}}. After 3+ iterations, only file issues for:
+- Factual errors that would lead to wrong implementation [T1]
+- Missing research areas required by the task [T2]
+Do NOT file issues for research formatting, organization, or depth preferences.
+{{- end}}
+{{- if ge .Iteration 5}}
+
+NOTE: After 5+ iterations, only file issues for factual errors that would block implementation [T1].
+{{- end}}

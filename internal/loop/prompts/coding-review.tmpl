@@ -24,3 +24,21 @@ Rules:
 - Do not file issues about style/formatting that a linter would catch.
 - Do not file issues for missing features outside the task scope.
 - Maximum 5 issues per review.
+- Every issue you file MUST include a tier tag in the title: [T1], [T2], [T3], or [T4].
+  [T1] Correctness — would cause a runtime error, data loss, or security issue.
+  [T2] Completeness — a requirement from the task is not addressed.
+  [T3] Design — the approach works but could be structured better.
+  [T4] Polish — style preferences, minor naming, or formatting choices.
+  Example title: "[T1] hidden_field :id without persisted? guard breaks removeIngredient"
+- If a section is marked as frozen in the Convergence Context below, do not file issues about it unless you've identified a Tier 1 (correctness) bug.
+{{- if ge .Iteration 3}}
+
+NOTE: This is review iteration {{.Iteration}}. After 3+ iterations, only file issues for:
+- Correctness bugs (code that would fail at runtime) [T1]
+- Missing requirements from the task description [T2]
+Do NOT file issues for style, naming, hover colors, or formatting.
+{{- end}}
+{{- if ge .Iteration 5}}
+
+NOTE: After 5+ iterations, only file issues for correctness bugs that would block implementation [T1].
+{{- end}}

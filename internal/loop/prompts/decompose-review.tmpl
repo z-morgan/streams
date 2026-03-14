@@ -13,3 +13,23 @@ If steps need reordering, renumbering, insertion, or removal, file a child issue
 File child issues for any adjustments needed. After your review, write a brief summary (2-4 sentences) of your overall assessment as your FINAL output. If you filed issues, summarize what you found. If the decomposition is ready with no issues filed, respond with exactly: "No further improvements needed."
 
 IMPORTANT: Your summary text MUST be the very last thing you output. Do not end on a tool call. The summary is captured and displayed to the human operator.
+
+Rules:
+- Every issue you file MUST include a tier tag in the title: [T1], [T2], [T3], or [T4].
+  [T1] Correctness — step ordering would cause build/test failures or data loss.
+  [T2] Completeness — a required step is missing or a step is too coarse to be one commit.
+  [T3] Design — steps work but could be better scoped or ordered.
+  [T4] Polish — minor naming or organizational preferences.
+  Example title: "[T2] Missing step for database migration between steps 3 and 4"
+- If a section is marked as frozen in the Convergence Context below, do not file issues about it unless you've identified a Tier 1 (correctness) bug.
+{{- if ge .Iteration 3}}
+
+NOTE: This is review iteration {{.Iteration}}. After 3+ iterations, only file issues for:
+- Step ordering that would cause build failures [T1]
+- Missing steps required by the plan [T2]
+Do NOT file issues for step naming, scope preferences, or reordering equally valid sequences.
+{{- end}}
+{{- if ge .Iteration 5}}
+
+NOTE: After 5+ iterations, only file issues for correctness problems that would block implementation [T1].
+{{- end}}
