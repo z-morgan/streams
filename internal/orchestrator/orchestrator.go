@@ -17,6 +17,7 @@ import (
 	"github.com/zmorgan/streams/internal/diagnosis"
 	"github.com/zmorgan/streams/internal/environment"
 	"github.com/zmorgan/streams/internal/loop"
+	"github.com/zmorgan/streams/internal/mcp"
 	"github.com/zmorgan/streams/internal/runtime"
 	"github.com/zmorgan/streams/internal/runtime/claude"
 	"github.com/zmorgan/streams/internal/store"
@@ -66,9 +67,10 @@ type Orchestrator struct {
 	sink       EventSink
 	config     Config
 	envManager *environment.Manager
+	mcpConfig  *mcp.Config
 }
 
-func New(s *store.Store, config Config, envManager *environment.Manager) *Orchestrator {
+func New(s *store.Store, config Config, envManager *environment.Manager, mcpConfig *mcp.Config) *Orchestrator {
 	return &Orchestrator{
 		streams:    make(map[string]*stream.Stream),
 		cancels:    make(map[string]context.CancelFunc),
@@ -77,6 +79,7 @@ func New(s *store.Store, config Config, envManager *environment.Manager) *Orches
 		store:      s,
 		config:     config,
 		envManager: envManager,
+		mcpConfig:  mcpConfig,
 	}
 }
 
@@ -127,7 +130,7 @@ func (o *Orchestrator) InitBeads(stealth bool) error {
 
 // Create creates a new stream backed by a beads parent issue and git worktree.
 // If pipeline is nil/empty, the global config pipeline is used.
-func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int, notify stream.NotifySettings) (*stream.Stream, error) {
+func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int, notify stream.NotifySettings, models ...stream.ModelConfig) (*stream.Stream, error) {
 	repoDir := o.config.RepoDir
 
 	parentID, err := createBeadsParent(title, repoDir)
@@ -176,6 +179,12 @@ func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints
 		SessionID:     newUUID(),
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
+	}
+	if len(models) > 0 {
+		st.Models = models[0]
+	}
+	if o.mcpConfig != nil {
+		st.MCPConfigPath = o.mcpConfig.Path
 	}
 
 	o.mu.Lock()
