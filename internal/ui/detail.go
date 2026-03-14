@@ -270,7 +270,7 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 	}
 
 	if isPausedAtReview(st) {
-		return "j/k: iterations  c: complete  r: revise  D: diagnose  g: guidance  b: breakpoints  d: delete  q/esc: back"
+		return "j/k: iterations  c: complete  r: revise  D: diagnose  g: guidance  b: config  d: delete  q/esc: back"
 	}
 
 	canRevise := st.GetPipelineIndex() > 0
@@ -281,19 +281,19 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 		if canRevise {
 			help += "  r: revise"
 		}
-		help += "  g: guidance  b: breakpoints  q/esc: back"
+		help += "  g: guidance  b: config  q/esc: back"
 	} else if canForceAdvance(st) {
 		help = "j/k: iterations  enter: focus output  a: attach  s: start  >: skip phase  D: diagnose"
 		if canRevise {
 			help += "  r: revise"
 		}
-		help += "  g: guidance  b: breakpoints  q/esc: back"
+		help += "  g: guidance  b: config  q/esc: back"
 	} else {
 		help = "j/k: iterations  enter: focus output  a: attach  s: start  D: diagnose"
 		if canRevise {
 			help += "  r: revise"
 		}
-		help += "  g: guidance  b: breakpoints  q/esc: back"
+		help += "  g: guidance  b: config  q/esc: back"
 	}
 
 	// Show artifact toggle hint when the selected snapshot has an artifact.

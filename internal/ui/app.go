@@ -2123,30 +2123,91 @@ func renderNotifyToggles(notify stream.NotifySettings) string {
 	return helpStyle.Render(fmt.Sprintf("  Notify: 1 %s bell  2 %s flash  3 %s system", dot(notify.Bell), dot(notify.Flash), dot(notify.System)))
 }
 
-func renderEditBreakpointsOverlay(pipeline []string, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
-	overlay := overlayTitleStyle.Render("Edit Breakpoints") + "\n\n"
-	overlay += "Set breakpoints (pause between phases):\n"
-	overlay += helpStyle.Render("  You'll be notified when the stream pauses at each breakpoint.") + "\n\n"
-	for i, name := range pipeline {
-		overlay += "  " + name + "\n"
-		if i < len(pipeline)-1 {
-			cursor := "  "
-			if i == bpCursor {
-				cursor = cursorStyle.Render("> ")
+func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, modelConfig stream.ModelConfig, modelCursor int, perPhase bool, phaseModelCursor int, modelOptions []string, width, height int) string {
+	// Tab header.
+	bpTab := "Breakpoints"
+	modelsTab := "Models"
+	if activeTab == 0 {
+		bpTab = selectedRowStyle.Render(bpTab)
+		modelsTab = helpStyle.Render(modelsTab)
+	} else {
+		bpTab = helpStyle.Render(bpTab)
+		modelsTab = selectedRowStyle.Render(modelsTab)
+	}
+	overlay := overlayTitleStyle.Render("Stream Config") + "\n\n"
+	overlay += "  " + bpTab + "    " + modelsTab + "\n\n"
+
+	if activeTab == 0 {
+		// Breakpoints tab content.
+		for i, name := range pipeline {
+			overlay += "  " + name + "\n"
+			if i < len(pipeline)-1 {
+				cursor := "  "
+				if i == bpCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				check := "[ ]"
+				if breakpoints[i] {
+					check = "[x]"
+				}
+				label := fmt.Sprintf("── %s pause after %s ──", check, name)
+				if i == bpCursor {
+					label = selectedRowStyle.Render(label)
+				}
+				overlay += cursor + label + "\n"
 			}
-			check := "[ ]"
-			if breakpoints[i] {
-				check = "[x]"
+		}
+		overlay += "\n" + renderNotifyToggles(notify) + "\n"
+		overlay += helpStyle.Render("tab: switch section  j/k: navigate  space: toggle  enter: save  esc: cancel")
+	} else {
+		// Models tab content.
+		if perPhase {
+			for i, phaseName := range pipeline {
+				cursor := "  "
+				if i == phaseModelCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				phaseModel := modelConfig.PerPhase[phaseName]
+				if phaseModel == "" {
+					phaseModel = "default"
+				}
+				label := fmt.Sprintf("%-12s %s", phaseName, phaseModel)
+				if i == phaseModelCursor {
+					label = selectedRowStyle.Render(label)
+				}
+				overlay += cursor + label + "\n"
 			}
-			label := fmt.Sprintf("── %s pause after %s ──", check, name)
-			if i == bpCursor {
-				label = selectedRowStyle.Render(label)
+			overlay += "\n  [x] Configure per phase\n"
+			overlay += "\n" + helpStyle.Render("tab: switch section  j/k: navigate  h/l: cycle model  p: all-phases  enter: save  esc: cancel")
+		} else {
+			selected := modelConfig.Default
+			if selected == "" {
+				selected = "default"
 			}
-			overlay += cursor + label + "\n"
+			for i, opt := range modelOptions {
+				cursor := "  "
+				if i == modelCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				radio := "○"
+				if opt == selected {
+					radio = "●"
+				}
+				label := opt
+				if opt == "default" {
+					label += " (CLI default)"
+				}
+				if i == modelCursor {
+					label = selectedRowStyle.Render(radio + " " + label)
+				} else {
+					label = radio + " " + label
+				}
+				overlay += cursor + label + "\n"
+			}
+			overlay += "\n  [ ] Configure per phase\n"
+			overlay += "\n" + helpStyle.Render("tab: switch section  j/k: navigate  space: select  p: per-phase  enter: save  esc: cancel")
 		}
 	}
-	overlay += "\n" + renderNotifyToggles(notify) + "\n"
-	overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: save  esc: cancel")
 
 	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
