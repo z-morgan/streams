@@ -253,63 +253,37 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 		if dv.beadShowOutput != "" {
 			return "esc: back to snapshot"
 		}
-		return "j/k: select bead  enter: show details  esc: back to iterations"
+		return HelpBarText(ScopeBeadBrowse, nil)
 	}
 
 	if dv.focusRight {
-		if dv.showArtifact {
-			return "j/k: scroll  G: bottom  f: back to summary  esc: back to list"
-		}
-		return "j/k: scroll  G: bottom  esc: back to list"
+		ctx := &DetailCtx{ShowArtifact: dv.showArtifact}
+		return HelpBarText(ScopeDetailOutput, ctx)
 	}
 
-	status := st.GetStatus()
+	ctx := buildDetailCtx(st, dv, rows, snaps)
+	return HelpBarText(ScopeDetail, ctx)
+}
 
-	if status == stream.StatusCompleted {
-		return "D: diagnose  d: delete  q/esc: back"
+func buildDetailCtx(st *stream.Stream, dv detailView, rows []iterationRow, snaps []stream.Snapshot) *DetailCtx {
+	ctx := &DetailCtx{
+		Status:     st.GetStatus(),
+		CanRevise:  st.GetPipelineIndex() > 0,
+		CanAdvance: canForceAdvance(st),
+		AtReview:   isPausedAtReview(st),
 	}
 
-	if isPausedAtReview(st) {
-		return "j/k: iterations  c: complete  r: revise  D: diagnose  g: guidance  b: config  d: delete  q/esc: back"
-	}
-
-	canRevise := st.GetPipelineIndex() > 0
-
-	var help string
-	if status == stream.StatusRunning {
-		help = "j/k: iterations  enter: focus output  a: attach  w: wrap up  x: pause  X: kill"
-		if canRevise {
-			help += "  r: revise"
-		}
-		help += "  g: guidance  b: config  q/esc: back"
-	} else if canForceAdvance(st) {
-		help = "j/k: iterations  enter: focus output  a: attach  s: start  >: skip phase  D: diagnose"
-		if canRevise {
-			help += "  r: revise"
-		}
-		help += "  g: guidance  b: config  q/esc: back"
-	} else {
-		help = "j/k: iterations  enter: focus output  a: attach  s: start  D: diagnose"
-		if canRevise {
-			help += "  r: revise"
-		}
-		help += "  g: guidance  b: config  q/esc: back"
-	}
-
-	// Show artifact toggle hint when the selected snapshot has an artifact.
 	cursor := dv.iterCursor
 	if cursor >= 0 && cursor < len(rows) {
 		row := rows[cursor]
 		if row.SnapshotIndex >= 0 && row.SnapshotIndex < len(snaps) && snaps[row.SnapshotIndex].Artifact != "" {
-			if dv.showArtifact {
-				help += "  f: show summary"
-			} else {
-				help += "  f: show " + snaps[row.SnapshotIndex].Phase + ".md"
-			}
+			ctx.HasArtifact = true
+			ctx.ShowArtifact = dv.showArtifact
+			ctx.ArtifactPhase = snaps[row.SnapshotIndex].Phase
 		}
 	}
 
-	return help
+	return ctx
 }
 
 func detailStatusMarker(st *stream.Stream) string {

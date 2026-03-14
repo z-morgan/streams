@@ -135,8 +135,8 @@ func renderDashboardList(streams []*stream.Stream, cursor int, width, height int
 	return b.String()
 }
 
-const dashboardListHelp = "j/k: navigate  enter: inspect  n: new  s: start  x: pause  X: kill  d: delete  D: diagnose  g: guidance  v: channels  q: quit"
-const dashboardChannelHelp = "h/l: navigate  enter: inspect  n: new  s: start  x: pause  X: kill  d: delete  D: diagnose  g: guidance  v: list  q: quit"
+var dashboardListHelp = HelpBarText(ScopeDashboard, nil)
+var dashboardChannelHelp = HelpBarText(ScopeDashboardChannels, nil)
 
 // renderHelp formats a help string with styled keys and actions.
 // Input format: "key: action  key: action  key: action"
