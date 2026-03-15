@@ -449,6 +449,26 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 	baseSHA := st.BaseSHA
 	o.mu.Unlock()
 
+	// Clean up artifact files left by pipeline phases (research.md, plan.md, etc.).
+	// Their content is already captured in snapshots — the on-disk copies are ephemeral.
+	if worktree != "" {
+		for _, phaseName := range st.Pipeline {
+			ph, err := loop.NewPhase(phaseName)
+			if err != nil {
+				continue
+			}
+			af := ph.ArtifactFile()
+			if af == "" {
+				continue
+			}
+			co := exec.Command("git", "checkout", "--", af)
+			co.Dir = worktree
+			if coErr := co.Run(); coErr != nil {
+				os.Remove(filepath.Join(worktree, af))
+			}
+		}
+	}
+
 	// Refuse to complete if there are uncommitted changes in the worktree.
 	// --force would silently destroy them.
 	if worktree != "" {
