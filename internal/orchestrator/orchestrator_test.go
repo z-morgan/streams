@@ -1,6 +1,10 @@
 package orchestrator
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -166,4 +170,160 @@ func TestEmitWithNilSink(t *testing.T) {
 
 	// Should not panic.
 	o.emit(Event{StreamID: "test", Kind: EventStarted})
+}
+
+// initTestRepo creates a git repo with one commit and returns the repo path
+// and the SHA of that initial commit.
+func initTestRepo(t *testing.T) (repoDir, baseSHA string) {
+	t.Helper()
+	repoDir = t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	// Create an initial commit so we have a base SHA.
+	readme := filepath.Join(repoDir, "README.md")
+	if err := os.WriteFile(readme, []byte("init\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"add", "README.md"},
+		{"commit", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	return repoDir, strings.TrimSpace(string(out))
+}
+
+func TestCompleteSucceedsWithDirtyArtifacts(t *testing.T) {
+	repoDir, baseSHA := initTestRepo(t)
+
+	// Create a worktree branch and worktree directory.
+	branch := "streams/test-1"
+	wtPath := filepath.Join(repoDir, ".streams", "worktrees", "test-1")
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, wtPath)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %s", out)
+	}
+
+	// Make a commit in the worktree beyond the base SHA.
+	appFile := filepath.Join(wtPath, "app.go")
+	if err := os.WriteFile(appFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"add", "app.go"},
+		{"commit", "-m", "add app"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wtPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	// Write artifact files (research.md untracked, plan.md untracked).
+	os.WriteFile(filepath.Join(wtPath, "research.md"), []byte("# Research\n"), 0644)
+	os.WriteFile(filepath.Join(wtPath, "plan.md"), []byte("# Plan\n"), 0644)
+
+	// Set up orchestrator with the stream.
+	storeRoot := t.TempDir()
+	o := New(&store.Store{Root: storeRoot}, Config{RepoDir: repoDir}, nil, nil)
+	st := &stream.Stream{
+		ID:        "test-1",
+		Name:      "Test",
+		Task:      "test task",
+		Pipeline:  []string{"research", "plan", "coding"},
+		Branch:    branch,
+		WorkTree:  wtPath,
+		BaseSHA:   baseSHA,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	o.mu.Lock()
+	o.streams["test-1"] = st
+	o.mu.Unlock()
+
+	// Complete should succeed — artifact files should be cleaned up.
+	if err := o.Complete("test-1", branch); err != nil {
+		t.Fatalf("Complete() failed: %v", err)
+	}
+
+	if st.Status != stream.StatusCompleted {
+		t.Errorf("expected StatusCompleted, got %v", st.Status)
+	}
+}
+
+func TestCompleteRejectsNonArtifactDirtyFiles(t *testing.T) {
+	repoDir, baseSHA := initTestRepo(t)
+
+	branch := "streams/test-2"
+	wtPath := filepath.Join(repoDir, ".streams", "worktrees", "test-2")
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, wtPath)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %s", out)
+	}
+
+	// Make a commit beyond base.
+	appFile := filepath.Join(wtPath, "app.go")
+	if err := os.WriteFile(appFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"add", "app.go"},
+		{"commit", "-m", "add app"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wtPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	// Write a non-artifact dirty file.
+	os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("uncommitted\n"), 0644)
+
+	storeRoot := t.TempDir()
+	o := New(&store.Store{Root: storeRoot}, Config{RepoDir: repoDir}, nil, nil)
+	st := &stream.Stream{
+		ID:        "test-2",
+		Name:      "Test",
+		Task:      "test task",
+		Pipeline:  []string{"research", "plan", "coding"},
+		Branch:    branch,
+		WorkTree:  wtPath,
+		BaseSHA:   baseSHA,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	o.mu.Lock()
+	o.streams["test-2"] = st
+	o.mu.Unlock()
+
+	err := o.Complete("test-2", branch)
+	if err == nil {
+		t.Fatal("expected Complete() to fail with dirty non-artifact file")
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Errorf("expected 'uncommitted changes' error, got: %v", err)
+	}
 }
