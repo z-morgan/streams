@@ -64,6 +64,35 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 	}
 }
 
+func TestLoadFromPath_PreservesHyphens(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mcp.json")
+
+	content := `{
+		"mcpServers": {
+			"my-custom-server": {
+				"command": "node",
+				"args": ["server.js"]
+			}
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromPath(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.ToolPatterns) != 1 {
+		t.Fatalf("got %d patterns, want 1", len(cfg.ToolPatterns))
+	}
+	if cfg.ToolPatterns[0] != "mcp__my-custom-server__*" {
+		t.Errorf("pattern = %q, want %q", cfg.ToolPatterns[0], "mcp__my-custom-server__*")
+	}
+}
+
 func TestLoadConfig_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	streamsDir := filepath.Join(dir, ".streams")

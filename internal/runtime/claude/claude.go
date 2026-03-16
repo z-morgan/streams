@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -43,7 +44,7 @@ func (r *Runtime) Run(ctx context.Context, req runtime.Request) (*runtime.Respon
 func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Response, error) {
 	args := []string{"-p", "--output-format", "json"}
 	args = appendCommonArgs(args, req)
-	args = append(args, req.Prompt)
+	args = append(args, "--", req.Prompt)
 
 	cmd := exec.CommandContext(ctx, r.command(), args...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
@@ -92,7 +93,7 @@ func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Re
 func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runtime.Response, error) {
 	args := []string{"-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"}
 	args = appendCommonArgs(args, req)
-	args = append(args, req.Prompt)
+	args = append(args, "--", req.Prompt)
 
 	cmd := exec.CommandContext(ctx, r.command(), args...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
@@ -180,6 +181,12 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 		}
 	}
 
+	scanErr := scanner.Err()
+	// Drain remaining pipe data so the process isn't blocked on write.
+	if scanErr != nil {
+		io.Copy(io.Discard, stdout)
+	}
+
 	waitErr := cmd.Wait()
 
 	if ctx.Err() != nil {
@@ -187,11 +194,23 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 	}
 
 	if waitErr != nil && finalResult == nil {
+		if scanErr != nil {
+			return nil, fmt.Errorf("claude CLI failed (exit %v): %s (scanner: %v)", waitErr, strings.TrimSpace(stderr.String()), scanErr)
+		}
 		return nil, fmt.Errorf("claude CLI failed (exit %v): %s", waitErr, strings.TrimSpace(stderr.String()))
 	}
 
 	if finalResult == nil {
-		return nil, fmt.Errorf("no result event in stream output")
+		if scanErr != nil {
+			return nil, fmt.Errorf("no result event in stream output (scanner: %v)", scanErr)
+		}
+		// CLI exited successfully but result event was not received — likely
+		// dropped by Node.js pipe buffer flush on process.exit(). Flush any
+		// remaining streamed text and return a degraded response.
+		flushRemaining(&textBuf, req.OnOutput)
+		return &runtime.Response{
+			SessionID: req.SessionID,
+		}, nil
 	}
 
 	if finalResult.Subtype == "error_max_budget_usd" {

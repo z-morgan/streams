@@ -198,6 +198,39 @@ func fetchModels() ([]ModelEntry, error) {
 	return models, nil
 }
 
+// DisplayName returns a human-friendly label for a model identifier.
+// Examples: "" → "Sonnet", "opus" → "Opus", "claude-sonnet-4-6-20250514" → "Sonnet 4.6".
+func DisplayName(model string) string {
+	switch strings.ToLower(model) {
+	case "", "default":
+		return "Sonnet" // CLI default
+	case "sonnet":
+		return "Sonnet"
+	case "opus":
+		return "Opus"
+	case "haiku":
+		return "Haiku"
+	}
+
+	if strings.HasPrefix(model, "ollama:") {
+		return model
+	}
+
+	// Parse full model IDs like "claude-sonnet-4-6-20250514".
+	parts := strings.Split(model, "-")
+	if len(parts) >= 4 && parts[0] == "claude" {
+		family := strings.ToUpper(parts[1][:1]) + parts[1][1:] // capitalize
+		version := parts[2]
+		if len(parts) >= 5 {
+			// major-minor before the date suffix
+			version += "." + parts[3]
+		}
+		return family + " " + version
+	}
+
+	return model
+}
+
 // modelFamily extracts the family prefix from a model ID.
 // e.g. "claude-sonnet-4-6-20250514" → "claude-sonnet-4"
 func modelFamily(id string) string {

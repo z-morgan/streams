@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/zmorgan/streams/internal/models"
 	"github.com/zmorgan/streams/internal/stream"
 )
 
@@ -343,10 +344,7 @@ func detailModelTag(st *stream.Stream) string {
 		return ""
 	}
 	model := st.GetModels().ModelForPhase(pipeline[idx])
-	if model == "" {
-		model = "default"
-	}
-	return "  " + helpStyle.Render("model: "+model)
+	return "  " + helpStyle.Render("model: "+models.DisplayName(model))
 }
 
 func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool, spinnerFrame string) string {

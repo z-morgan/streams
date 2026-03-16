@@ -239,3 +239,53 @@ func TestRunMalformedJSON(t *testing.T) {
 		t.Errorf("error should mention parse failure, got: %v", err)
 	}
 }
+
+func TestRunStreamingScannerError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fake-claude")
+	// Output a single line > 1MB to exceed the scanner's buffer limit,
+	// triggering bufio.ErrTooLong.
+	script := "#!/bin/sh\ndd if=/dev/zero bs=1100000 count=1 2>/dev/null | tr '\\0' 'a'\n"
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &Runtime{Command: path}
+	_, err := rt.Run(context.Background(), runtime.Request{
+		Prompt:   "overflow",
+		OnOutput: func(line string) {},
+	})
+	if err == nil {
+		t.Fatal("expected error for scanner buffer overflow")
+	}
+	if !strings.Contains(err.Error(), "scanner") {
+		t.Errorf("error should mention scanner, got: %v", err)
+	}
+}
+
+func TestRunStreamingMissingResultFallback(t *testing.T) {
+	dir := t.TempDir()
+	// Stream events without a final result event, exit 0.
+	ndjson := `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"work done\n"}}}
+{"type":"stream_event","event":{"type":"content_block_stop"}}`
+
+	fakeClaude := writeFakeClaude(t, dir, ndjson, 0)
+
+	var lines []string
+	rt := &Runtime{Command: fakeClaude}
+	resp, err := rt.Run(context.Background(), runtime.Request{
+		Prompt:    "do work",
+		SessionID: "existing-session-123",
+		OnOutput:  func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatalf("expected degraded response, got error: %v", err)
+	}
+	if resp.SessionID != "existing-session-123" {
+		t.Errorf("got session_id %q, want %q", resp.SessionID, "existing-session-123")
+	}
+	// The streamed text should still have been delivered via the callback.
+	if len(lines) == 0 {
+		t.Error("expected at least one output line from streaming")
+	}
+}

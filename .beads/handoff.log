@@ -1,0 +1,17 @@
+All done. Here's a summary:
+
+## Completed: Keyboard Help Modal (streams-lwtz)
+
+**5 implementation commits:**
+
+1. **Keybinding registry** (`internal/ui/keybindings.go`) — Declarative `Bindings` slice with `Scope`, `Condition`, `ShowFunc`, and `ActionFunc`. Helpers: `BindingsForScope()`, `HelpBarText()`.
+
+2. **Help text refactor** — Replaced `dashboardListHelp`/`dashboardChannelHelp` constants and the 60-line `detailHelpText()` with calls to `HelpBarText()`. Detail view uses `DetailCtx` for state-driven conditional display.
+
+3. **Update handler** — `showHelp`/`helpScroll` on Model, `updateHelp()` with esc/?/j/k/g/G, `?` keypress wired after quit confirm.
+
+4. **Render overlay** — Groups bindings by scope (Global, Dashboard, Inspect, Output Pane, Bead Browse) with scroll support. Conditions shown parenthesized and muted.
+
+5. **Coverage test** — Bidirectional fixture test in `keybindings_test.go` catches both missing and stale registry entries, with arrow key alias resolution.
+
+**Verified via tmux:** Modal opens from both dashboard and detail views, scrolling works, esc/? dismisses, help bar renders correctly in all views.

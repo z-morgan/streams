@@ -3,7 +3,7 @@
   "name": "hello world",
   "task": "hello world",
   "mode": "Autonomous",
-  "status": "Created",
+  "status": "Paused",
   "pipeline": [
     "coding"
   ],
@@ -15,6 +15,13 @@
   "base_sha": "67d5a7523ff0ac21c769a5b6867af14b6d69b1c7",
   "branch": "streams/streams-q7d",
   "worktree": "/Users/zmorgan/zm_apps/streams/.streams/worktrees/streams-q7d",
+  "session_id": "495552c7-c467-417b-97f5-a93089e06aab",
+  "last_error": {
+    "kind": "Infra",
+    "step": "Implement",
+    "message": "failed to fetch steps",
+    "detail": "bd show --children --json: chdir /Users/zmorgan/zm_apps/streams/.streams/worktrees/streams-q7d: no such file or directory"
+  },
   "created_at": "2026-03-06T00:52:18.282784-08:00",
-  "updated_at": "2026-03-06T00:52:18.282784-08:00"
+  "updated_at": "2026-03-13T23:38:17.785398-07:00"
 }

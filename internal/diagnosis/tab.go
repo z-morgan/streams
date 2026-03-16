@@ -52,6 +52,8 @@ func LaunchInTab(s *stream.Stream, storeRoot, workDir string) error {
 		return launchTmuxWindow(scriptFile.Name(), s.Task)
 	}
 	switch os.Getenv("TERM_PROGRAM") {
+	case "ghostty":
+		return launchGhosttyWindow(scriptFile.Name())
 	case "iTerm.app":
 		return launchITermTab(scriptFile.Name())
 	default:
@@ -69,6 +71,10 @@ func launchTmuxWindow(script, title string) error {
 	}
 	args = append(args, script)
 	return exec.Command("tmux", args...).Run()
+}
+
+func launchGhosttyWindow(script string) error {
+	return exec.Command("open", "-na", "Ghostty.app", "--args", "-e", script).Run()
 }
 
 func launchITermTab(script string) error {
