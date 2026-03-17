@@ -315,6 +315,9 @@ func (o *Orchestrator) Start(id string) error {
 		delete(o.cancels, id)
 		delete(o.done, id)
 		o.mu.Unlock()
+
+		// Check if any blocked streams can now start.
+		o.checkDependents()
 	}()
 
 	return nil
@@ -659,6 +662,102 @@ func (o *Orchestrator) SendGuidance(id string, text string) error {
 	}
 	st.AddGuidance(g)
 	return nil
+}
+
+// SetBlockedBy updates the blocker list for a stream. The blockerIDs must
+// reference existing streams (other than the stream itself). The stream is
+// checkpointed after the update.
+func (o *Orchestrator) SetBlockedBy(id string, blockerIDs []string) error {
+	o.mu.RLock()
+	st := o.streams[id]
+	o.mu.RUnlock()
+	if st == nil {
+		return fmt.Errorf("stream %q not found", id)
+	}
+
+	// Validate blocker IDs.
+	o.mu.RLock()
+	for _, bid := range blockerIDs {
+		if bid == id {
+			o.mu.RUnlock()
+			return fmt.Errorf("stream cannot block itself")
+		}
+		if o.streams[bid] == nil {
+			o.mu.RUnlock()
+			return fmt.Errorf("blocker stream %q not found", bid)
+		}
+	}
+	o.mu.RUnlock()
+
+	st.SetBlockedBy(blockerIDs)
+	o.checkpoint(st)
+	return nil
+}
+
+// ActiveBlockers returns the subset of a stream's BlockedBy IDs that are
+// currently running. Used by the UI to display the blocker count.
+func (o *Orchestrator) ActiveBlockers(id string) []string {
+	o.mu.RLock()
+	st := o.streams[id]
+	o.mu.RUnlock()
+	if st == nil {
+		return nil
+	}
+
+	blockers := st.GetBlockedBy()
+	if len(blockers) == 0 {
+		return nil
+	}
+
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	var active []string
+	for _, bid := range blockers {
+		if _, running := o.cancels[bid]; running {
+			active = append(active, bid)
+		}
+	}
+	return active
+}
+
+// checkDependents iterates all streams and auto-starts any that have a
+// non-empty BlockedBy list where none of the blockers are currently running.
+// Called after a stream's loop goroutine exits.
+func (o *Orchestrator) checkDependents() {
+	o.mu.RLock()
+	var candidates []string
+	for id, st := range o.streams {
+		blockers := st.GetBlockedBy()
+		if len(blockers) == 0 {
+			continue
+		}
+		status := st.GetStatus()
+		if status == stream.StatusRunning || status == stream.StatusCompleted {
+			continue
+		}
+		if _, running := o.cancels[id]; running {
+			continue
+		}
+		// Check if any blocker is still running.
+		anyRunning := false
+		for _, bid := range blockers {
+			if _, running := o.cancels[bid]; running {
+				anyRunning = true
+				break
+			}
+		}
+		if !anyRunning {
+			candidates = append(candidates, id)
+		}
+	}
+	o.mu.RUnlock()
+
+	for _, id := range candidates {
+		slog.Info("auto-starting dependent stream", "stream", id)
+		if err := o.Start(id); err != nil {
+			slog.Error("failed to auto-start dependent stream", "stream", id, "err", err)
+		}
+	}
 }
 
 // DefaultPipeline returns the global default pipeline from config.
