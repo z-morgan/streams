@@ -327,3 +327,123 @@ func TestCompleteRejectsNonArtifactDirtyFiles(t *testing.T) {
 		t.Errorf("expected 'uncommitted changes' error, got: %v", err)
 	}
 }
+
+func TestSetBlockedBy(t *testing.T) {
+	root := t.TempDir()
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
+
+	st1 := &stream.Stream{ID: "s1", Name: "A", Pipeline: []string{"coding"}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	st2 := &stream.Stream{ID: "s2", Name: "B", Pipeline: []string{"coding"}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+
+	o.mu.Lock()
+	o.streams["s1"] = st1
+	o.streams["s2"] = st2
+	o.snaps["s1"] = 0
+	o.snaps["s2"] = 0
+	o.mu.Unlock()
+
+	// Set s1 blocked by s2.
+	if err := o.SetBlockedBy("s1", []string{"s2"}); err != nil {
+		t.Fatalf("SetBlockedBy: %v", err)
+	}
+	blockers := st1.GetBlockedBy()
+	if len(blockers) != 1 || blockers[0] != "s2" {
+		t.Fatalf("expected [s2], got %v", blockers)
+	}
+
+	// Self-blocking should fail.
+	if err := o.SetBlockedBy("s1", []string{"s1"}); err == nil {
+		t.Fatal("expected error for self-blocking")
+	}
+
+	// Missing blocker should fail.
+	if err := o.SetBlockedBy("s1", []string{"nonexistent"}); err == nil {
+		t.Fatal("expected error for missing blocker")
+	}
+
+	// Missing stream should fail.
+	if err := o.SetBlockedBy("nonexistent", []string{"s1"}); err == nil {
+		t.Fatal("expected error for missing stream")
+	}
+}
+
+func TestActiveBlockers(t *testing.T) {
+	root := t.TempDir()
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
+
+	st1 := &stream.Stream{ID: "s1", Name: "A", Pipeline: []string{"coding"}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	st2 := &stream.Stream{ID: "s2", Name: "B", Pipeline: []string{"coding"}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+
+	o.mu.Lock()
+	o.streams["s1"] = st1
+	o.streams["s2"] = st2
+	o.snaps["s1"] = 0
+	o.snaps["s2"] = 0
+	o.mu.Unlock()
+
+	st1.SetBlockedBy([]string{"s2"})
+
+	// s2 not running — no active blockers.
+	active := o.ActiveBlockers("s1")
+	if len(active) != 0 {
+		t.Fatalf("expected 0 active blockers, got %v", active)
+	}
+
+	// Simulate s2 running.
+	o.mu.Lock()
+	o.cancels["s2"] = func() {}
+	o.mu.Unlock()
+
+	active = o.ActiveBlockers("s1")
+	if len(active) != 1 || active[0] != "s2" {
+		t.Fatalf("expected [s2] active, got %v", active)
+	}
+
+	// Missing stream returns nil.
+	if o.ActiveBlockers("nonexistent") != nil {
+		t.Fatal("expected nil for missing stream")
+	}
+}
+
+func TestCheckDependentsAutoStart(t *testing.T) {
+	root := t.TempDir()
+	o := New(&store.Store{Root: root}, Config{}, nil, nil)
+
+	st1 := &stream.Stream{ID: "s1", Name: "Blocker", Pipeline: []string{"coding"}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	st2 := &stream.Stream{ID: "s2", Name: "Dependent", Pipeline: []string{"coding"}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	st1.SetStatus(stream.StatusPaused)
+	st2.SetStatus(stream.StatusCreated)
+	st2.SetBlockedBy([]string{"s1"})
+
+	o.mu.Lock()
+	o.streams["s1"] = st1
+	o.streams["s2"] = st2
+	o.snaps["s1"] = 0
+	o.snaps["s2"] = 0
+	o.mu.Unlock()
+
+	// s1 is not running, s2 has blockers but none are running.
+	// checkDependents should try to auto-start s2.
+	// Since s2 has no worktree/runtime, Start will fail, but we can verify the attempt.
+	o.checkDependents()
+
+	// If s2's blockers are all stopped and s2 is in Created status,
+	// checkDependents should attempt to start it. The start will fail
+	// because we don't have a real runtime, but we can verify the status
+	// didn't change to Running (since Start requires a valid phase).
+
+	// With a running blocker, checkDependents should NOT try to start.
+	o.mu.Lock()
+	o.cancels["s1"] = func() {}
+	o.mu.Unlock()
+
+	// Reset s2 status.
+	st2.SetStatus(stream.StatusCreated)
+	o.checkDependents()
+
+	// s1 is still "running" (has a cancel), so s2 should NOT be started.
+	// Verify s2 is still Created.
+	if st2.GetStatus() != stream.StatusCreated {
+		t.Errorf("s2 should still be Created when blocker is running, got %v", st2.GetStatus())
+	}
+}

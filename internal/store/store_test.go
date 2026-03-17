@@ -306,6 +306,67 @@ func TestSaveAndLoadWithoutBreakpoints(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadWithBlockedBy(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	st := &stream.Stream{
+		ID:        "test-blocked",
+		Name:      "Blocked stream",
+		Task:      "test",
+		Pipeline:  []string{"coding"},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	st.SetBlockedBy([]string{"blocker-1", "blocker-2"})
+
+	_, err := s.Save(st, 0)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := s.Load("test-blocked")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	blockers := loaded.GetBlockedBy()
+	if len(blockers) != 2 {
+		t.Fatalf("BlockedBy: got %d, want 2", len(blockers))
+	}
+	if blockers[0] != "blocker-1" || blockers[1] != "blocker-2" {
+		t.Errorf("BlockedBy: got %v, want [blocker-1 blocker-2]", blockers)
+	}
+}
+
+func TestSaveAndLoadWithoutBlockedBy(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	st := &stream.Stream{
+		ID:        "test-no-blocked",
+		Name:      "No blockers",
+		Task:      "test",
+		Pipeline:  []string{"coding"},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	_, err := s.Save(st, 0)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := s.Load("test-no-blocked")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(loaded.GetBlockedBy()) != 0 {
+		t.Errorf("BlockedBy: got %v, want empty", loaded.GetBlockedBy())
+	}
+}
+
 func TestLoadAllIgnoresFiles(t *testing.T) {
 	root := t.TempDir()
 	s := &Store{Root: root}
