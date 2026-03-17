@@ -42,6 +42,7 @@ type streamData struct {
 	Models          *modelConfigData   `json:"models,omitempty"`
 	Fallback        *fallbackData      `json:"fallback,omitempty"`
 	Notify          *notifyData        `json:"notify,omitempty"`
+	BlockedBy       []string            `json:"blocked_by,omitempty"`
 	Convergence     *convergence.Config `json:"convergence,omitempty"`
 	LastError       *errData           `json:"last_error,omitempty"`
 	PendingRevise   *pendingReviseData `json:"pending_revise,omitempty"`
@@ -232,6 +233,9 @@ func toStreamData(st *stream.Stream) streamData {
 		CreatedAt:       st.CreatedAt,
 		UpdatedAt:       st.UpdatedAt,
 	}
+	if blockers := st.GetBlockedBy(); len(blockers) > 0 {
+		d.BlockedBy = blockers
+	}
 	mc := st.GetModels()
 	if mc.Default != "" || len(mc.PerPhase) > 0 {
 		d.Models = &modelConfigData{Default: mc.Default, PerPhase: mc.PerPhase}
@@ -296,6 +300,9 @@ func fromStreamData(d streamData) *stream.Stream {
 	}
 	st.SetStatus(parseStatus(d.Status))
 	st.SetIteration(d.Iteration)
+	if len(d.BlockedBy) > 0 {
+		st.BlockedBy = d.BlockedBy
+	}
 
 	if d.LastError != nil {
 		st.LastError = &stream.LoopError{
