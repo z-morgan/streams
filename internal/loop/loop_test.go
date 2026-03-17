@@ -505,6 +505,87 @@ func TestRunSkipsReviewWhenPromptEmpty(t *testing.T) {
 	}
 }
 
+func TestRunGuidanceDefersConvergence(t *testing.T) {
+	s := newTestStream()
+	rt := &mockRuntime{
+		results: []mockResult{
+			// Iteration 0: converges, but guidance is pending → deferred.
+			{resp: &runtime.Response{Text: "impl1"}},
+			{resp: &runtime.Response{Text: "review1"}},
+			// Iteration 1: guidance-driven iteration, then converges.
+			{resp: &runtime.Response{Text: "impl2-with-guidance"}},
+			{resp: &runtime.Response{Text: "review2"}},
+		},
+	}
+	// Iteration 0: idsBefore=[b-1], idsAfterImpl=[], idsAfterReview=[] → would converge.
+	// Iteration 1: idsBefore=[], idsAfterImpl=[], idsAfterReview=[] → converges.
+	beads := &mockBeads{openIDs: [][]string{
+		ids("b-1"), nil, nil,
+		nil, nil, nil,
+	}}
+
+	// Add guidance before running — it will be drained at the convergence check.
+	s.AddGuidance(stream.Guidance{Text: "focus on error handling"})
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
+
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	// Should have run 2 iterations: convergence deferred on iter 0, converged on iter 1.
+	if len(s.Snapshots) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", len(s.Snapshots))
+	}
+	// The guidance should be recorded as consumed in iteration 1's snapshot.
+	if len(s.Snapshots[1].GuidanceConsumed) != 1 {
+		t.Errorf("expected 1 guidance consumed in snapshot 1, got %d", len(s.Snapshots[1].GuidanceConsumed))
+	}
+	if s.Snapshots[1].GuidanceConsumed[0].Text != "focus on error handling" {
+		t.Errorf("unexpected guidance text: %q", s.Snapshots[1].GuidanceConsumed[0].Text)
+	}
+	// Runtime should have been called 4 times (2 iterations × impl+review).
+	if rt.calls != 4 {
+		t.Errorf("expected 4 runtime calls, got %d", rt.calls)
+	}
+}
+
+func TestRunResumeConvergedWithGuidanceReEntersPhase(t *testing.T) {
+	s := newTestStream()
+	s.Pipeline = []string{"plan", "coding"}
+	s.PipelineIndex = 0
+	s.Converged = true // paused at breakpoint after plan converged
+
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "impl-with-guidance"}},
+			{resp: &runtime.Response{Text: "review"}},
+		},
+	}
+	// Re-entering plan phase: idsBefore=[], idsAfterImpl=[], idsAfterReview=[] → converges.
+	beads := &mockBeads{openIDs: [][]string{nil, nil, nil}}
+
+	// Add guidance while paused — should prevent advance and re-enter plan.
+	s.AddGuidance(stream.Guidance{Text: "add error handling section"})
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
+
+	// Should have re-entered plan (index 0), NOT advanced to coding (index 1).
+	// After processing guidance and converging, it pauses (mockPhase has TransitionPause).
+	if s.PipelineIndex != 0 {
+		t.Errorf("expected PipelineIndex=0 (re-entered plan), got %d", s.PipelineIndex)
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true after re-entering and converging")
+	}
+	if len(s.Snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(s.Snapshots))
+	}
+	// Guidance should be recorded as consumed.
+	if len(s.Snapshots[0].GuidanceConsumed) != 1 {
+		t.Errorf("expected 1 guidance consumed, got %d", len(s.Snapshots[0].GuidanceConsumed))
+	}
+}
+
 func TestRunMaxIterationsIncludesPhaseAndDiagnostic(t *testing.T) {
 	s := newTestStream()
 	s.Pipeline = []string{"coding"}

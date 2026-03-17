@@ -46,39 +46,51 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		return
 	}
 
-	// If converged (e.g. resuming from a breakpoint) with no pending guidance,
-	// advance to the next pipeline phase before entering the iteration loop.
-	if s.Converged {
-		pipeline := s.GetPipeline()
-		nextIdx := s.GetPipelineIndex() + 1
-		if nextIdx < len(pipeline) {
-			nextPhase, err := factory(pipeline[nextIdx])
-			if err != nil {
-				recordError(s, phase, stream.ErrInfra, stream.StepCheckpoint, "failed to instantiate next phase", err.Error())
-				return
-			}
-			s.SetPipelineIndex(nextIdx)
-			s.SetConverged(false)
-			s.SetIteration(0)
-			phase = nextPhase
-			slog.Info("advancing pipeline on resume", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
+	// pendingGuidance is declared before the converged-resume check so that
+	// guidance added while paused can be seeded before the iteration loop.
+	var pendingGuidance []stream.Guidance
 
-			// If the next phase is slotted, run its slots and return.
-			if slotted, ok := nextPhase.(SlottedPhase); ok {
-				runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs, mcpConfigPath, mcpToolPatterns)
+	// If converged (e.g. resuming from a breakpoint), check for pending
+	// guidance before advancing. Guidance added while paused should be
+	// consumed in the current phase first.
+	if s.Converged {
+		if drained := s.DrainGuidance(); len(drained) > 0 {
+			// Guidance arrived while paused/converged — re-enter the current
+			// phase so the implement step can act on it.
+			s.SetConverged(false)
+			pendingGuidance = drained
+			slog.Info("guidance pending on converged stream, re-entering phase", "stream", s.ID, "count", len(drained))
+		} else {
+			pipeline := s.GetPipeline()
+			nextIdx := s.GetPipelineIndex() + 1
+			if nextIdx < len(pipeline) {
+				nextPhase, err := factory(pipeline[nextIdx])
+				if err != nil {
+					recordError(s, phase, stream.ErrInfra, stream.StepCheckpoint, "failed to instantiate next phase", err.Error())
+					return
+				}
+				s.SetPipelineIndex(nextIdx)
+				s.SetConverged(false)
+				s.SetIteration(0)
+				phase = nextPhase
+				slog.Info("advancing pipeline on resume", "stream", s.ID, "phase", nextPhase.Name(), "pipelineIndex", nextIdx)
+
+				// If the next phase is slotted, run its slots and return.
+				if slotted, ok := nextPhase.(SlottedPhase); ok {
+					runSlots(ctx, s, slotted, rt, git, onCheckpoint, promptOverrideDirs, mcpConfigPath, mcpToolPatterns)
+					return
+				}
+			} else {
+				// Already at last phase and converged — nothing to do.
+				s.SetStatus(stream.StatusPaused)
 				return
 			}
-		} else {
-			// Already at last phase and converged — nothing to do.
-			s.SetStatus(stream.StatusPaused)
-			return
 		}
 	}
 
 	// Resolve convergence config: global ← per-stream.
 	mergedConvergence := convergence.Merge(globalConvergence, s.GetConvergence())
 
-	var pendingGuidance []stream.Guidance
 	startIteration := s.GetIteration()
 
 	// Previous artifact content for section tracking diffs.
@@ -481,6 +493,16 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 		}
 
 		if converged {
+			// Before declaring convergence, check for pending guidance.
+			// Operator guidance should force another iteration so the
+			// implement step can act on it.
+			if drained := s.DrainGuidance(); len(drained) > 0 {
+				pendingGuidance = drained
+				s.SetIteration(iteration + 1)
+				slog.Info("guidance pending, deferring convergence", "stream", s.ID, "phase", phase.Name(), "count", len(drained))
+				continue
+			}
+
 			s.SetConverged(true)
 			slog.Info("phase converged", "stream", s.ID, "phase", phase.Name(), "iteration", iteration)
 
