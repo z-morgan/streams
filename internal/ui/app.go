@@ -125,6 +125,12 @@ type Model struct {
 	showGuidance  bool
 	guidanceInput textarea.Model
 
+	// Blocker picker overlay state.
+	showBlockers     bool
+	blockerCursor    int
+	blockerChecked   map[string]bool
+	blockerStreamIDs []string
+
 	// New stream overlay state.
 	showNewStream             bool
 	newStreamTitle            textarea.Model
@@ -412,6 +418,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateGuidance(msg)
 	}
 
+	// Handle blocker picker overlay if active.
+	if m.showBlockers {
+		return m.updateBlockers(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch m.view {
@@ -614,6 +625,31 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, textarea.Blink
 		}
 		return m.setStatus("No stream selected.")
+
+	case "b":
+		if st := m.selectedStream(); st != nil {
+			m.selectedID = st.ID
+			currentBlockers := st.GetBlockedBy()
+			checked := make(map[string]bool)
+			for _, bid := range currentBlockers {
+				checked[bid] = true
+			}
+			var otherIDs []string
+			for _, s := range streams {
+				if s.ID != st.ID {
+					otherIDs = append(otherIDs, s.ID)
+				}
+			}
+			if len(otherIDs) == 0 {
+				return m.setStatus("No other streams to set as blockers.")
+			}
+			m.blockerChecked = checked
+			m.blockerStreamIDs = otherIDs
+			m.blockerCursor = 0
+			m.showBlockers = true
+		} else {
+			return m.setStatus("No stream selected.")
+		}
 
 	case "d":
 		if st := m.selectedStream(); st != nil {
@@ -1655,6 +1691,58 @@ func (m Model) updateGuidance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateBlockers(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc":
+			m.showBlockers = false
+			return m, nil
+
+		case "j", "down":
+			if m.blockerCursor < len(m.blockerStreamIDs)-1 {
+				m.blockerCursor++
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.blockerCursor > 0 {
+				m.blockerCursor--
+			}
+			return m, nil
+
+		case "space":
+			if m.blockerCursor < len(m.blockerStreamIDs) {
+				id := m.blockerStreamIDs[m.blockerCursor]
+				if m.blockerChecked[id] {
+					delete(m.blockerChecked, id)
+				} else {
+					m.blockerChecked[id] = true
+				}
+			}
+			return m, nil
+
+		case "enter":
+			var selected []string
+			for _, id := range m.blockerStreamIDs {
+				if m.blockerChecked[id] {
+					selected = append(selected, id)
+				}
+			}
+			if err := m.orch.SetBlockedBy(m.selectedID, selected); err != nil {
+				m.showBlockers = false
+				return m.setStatus("Error: " + err.Error())
+			}
+			m.showBlockers = false
+			if len(selected) > 0 {
+				return m.setStatus(fmt.Sprintf("Set %d blocker(s).", len(selected)))
+			}
+			return m.setStatus("Cleared blockers.")
+		}
+	}
+	return m, nil
+}
+
 func (m Model) updateRestartPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -2027,6 +2115,10 @@ func (m Model) viewString() string {
 
 	if m.showGuidance {
 		return renderGuidanceOverlay(m.guidanceInput, m.width, m.height)
+	}
+
+	if m.showBlockers {
+		return renderBlockersOverlay(m.blockerStreamIDs, m.blockerChecked, m.blockerCursor, m.orch, m.width, m.height)
 	}
 
 	switch m.view {
@@ -2459,6 +2551,42 @@ func renderGuidanceOverlay(ti textarea.Model, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
+func renderBlockersOverlay(streamIDs []string, checked map[string]bool, cursor int, orch *orchestrator.Orchestrator, width, height int) string {
+	overlay := overlayTitleStyle.Render("Set Blockers") + "\n\n"
+	overlay += helpStyle.Render("This stream will auto-start when all selected blockers stop running.") + "\n\n"
+
+	for i, id := range streamIDs {
+		st := orch.Get(id)
+		name := id
+		if st != nil {
+			name = st.Name
+		}
+
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ")
+		}
+
+		check := "[ ] "
+		if checked[id] {
+			check = "[x] "
+		}
+
+		label := name
+		if st != nil {
+			status := strings.ToLower(st.GetStatus().String())
+			label += helpStyle.Render(" (" + status + ")")
+		}
+
+		overlay += prefix + check + label + "\n"
+	}
+
+	overlay += "\n" + helpStyle.Render("j/k: navigate  space: toggle  enter: confirm  esc: cancel")
+
+	box := overlayStyle.Width(overlayWidth(width, 80)).Render(overlay)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
 func renderRestartPromptOverlay(width, height int) string {
 	overlay := overlayTitleStyle.Render("Restart Stream?") + "\n\n"
 	overlay += "The stream was paused for attach.\n"
@@ -2742,12 +2870,13 @@ func overlayWidth(termWidth, maxCap int) int {
 }
 
 // isPausedAtReview returns true when the stream is paused and converged at
-// the review phase with no error — the state where c/r actions are available.
+// the last pipeline phase with no error — the state where c/r actions are available.
 func isPausedAtReview(st *stream.Stream) bool {
 	if st.GetStatus() != stream.StatusPaused || !st.Converged || st.GetLastError() != nil {
 		return false
 	}
-	return currentPhase(st) == "review"
+	pipeline := st.GetPipeline()
+	return st.GetPipelineIndex() >= len(pipeline)-1
 }
 
 // slugify converts a title into a branch-name-friendly slug.
