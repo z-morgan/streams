@@ -138,6 +138,7 @@ type Model struct {
 	newStreamPhaseModelCursor int                   // which phase row is focused (per-phase mode)
 	newStreamFallback         stream.FallbackConfig // fallback model config
 	newStreamFBCursor         int                   // cursor into ollama models for fallback picker
+	newStreamShowFallback     bool                  // whether fallback picker is visible
 	newStreamBreakpoints      map[int]bool          // which pipeline gaps have breakpoints
 	newStreamBPCursor         int                   // cursor into breakpoint gaps
 	newStreamNotify           stream.NotifySettings // notification toggles
@@ -1223,7 +1224,12 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "j", "down":
-			if m.newStreamPerPhase {
+			if m.newStreamShowFallback {
+				ollamaOpts := m.modelFetcher.OllamaOptions()
+				if m.newStreamFBCursor < len(ollamaOpts)-1 {
+					m.newStreamFBCursor++
+				}
+			} else if m.newStreamPerPhase {
 				if m.newStreamPhaseModelCursor < len(pipeline)-1 {
 					m.newStreamPhaseModelCursor++
 				}
@@ -1235,7 +1241,11 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "k", "up":
-			if m.newStreamPerPhase {
+			if m.newStreamShowFallback {
+				if m.newStreamFBCursor > 0 {
+					m.newStreamFBCursor--
+				}
+			} else if m.newStreamPerPhase {
 				if m.newStreamPhaseModelCursor > 0 {
 					m.newStreamPhaseModelCursor--
 				}
@@ -1247,7 +1257,19 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "space":
-			if !m.newStreamPerPhase {
+			if m.newStreamShowFallback {
+				ollamaOpts := m.modelFetcher.OllamaOptions()
+				if m.newStreamFBCursor >= 0 && m.newStreamFBCursor < len(ollamaOpts) {
+					selected := ollamaOpts[m.newStreamFBCursor]
+					if m.newStreamFallback.Model == selected {
+						m.newStreamFallback.Enabled = false
+						m.newStreamFallback.Model = ""
+					} else {
+						m.newStreamFallback.Enabled = true
+						m.newStreamFallback.Model = selected
+					}
+				}
+			} else if !m.newStreamPerPhase {
 				if m.newStreamModelCursor >= 0 && m.newStreamModelCursor < len(modelOptions) {
 					m.newStreamModels.Default = modelOptions[m.newStreamModelCursor]
 				}
@@ -1281,12 +1303,9 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "f":
-			m.newStreamFallback.Enabled = !m.newStreamFallback.Enabled
-			if m.newStreamFallback.Enabled && m.newStreamFallback.Model == "" {
-				ollamaOpts := m.modelFetcher.OllamaOptions()
-				if len(ollamaOpts) > 0 {
-					m.newStreamFallback.Model = ollamaOpts[0]
-				}
+			m.newStreamShowFallback = !m.newStreamShowFallback
+			if m.newStreamShowFallback {
+				m.newStreamFBCursor = 0
 			}
 			return m, nil
 
@@ -1956,7 +1975,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamShowFallback, m.newStreamFBCursor, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -2072,7 +2091,7 @@ func (m Model) viewString() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, showFallback bool, fbCursor int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth, width, height int) string {
 	var overlay string
 
 	totalSteps := 4
@@ -2093,8 +2112,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n\n"
 		overlay += "Task:\n"
 		overlay += taskInput.View() + "\n\n"
-		overlay += helpStyle.Render(fmt.Sprintf("ow=%d tw=%d wlc=%d", taskOverlayWidth, taskInput.Width(), wrappedLineCount(taskInput.Value(), taskInput.Width())))
-		overlay += "\n" + helpStyle.Render("enter: next  shift+enter: new line  esc: back")
+		overlay += helpStyle.Render("enter: next  shift+enter: new line  esc: back")
 	case 3:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
@@ -2118,34 +2136,14 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 				overlay += cursor + label + "\n"
 			}
 			overlay += "\n"
-			perPhaseCheck := "[x]"
-			overlay += "  " + perPhaseCheck + " Configure per phase\n"
-			fbCheck := "[ ]"
-			if fallback.Enabled {
-				fbCheck = "[x]"
-			}
-			fbLabel := fbCheck + " Rate limit fallback"
-			if fallback.Enabled && fallback.Model != "" {
-				fbLabel += " → " + fallback.Model
-			}
-			overlay += "  " + fbLabel + "\n"
+			overlay += renderInlineFallback(showFallback, fallback, fbCursor, modelSections, ollamaRunning)
 			overlay += "\n" + helpStyle.Render("j/k: navigate phase  h/l: cycle model  tab: all-phases  f: fallback  enter: confirm  esc: back")
 		} else {
 			overlay += "  " + selectedRowStyle.Render("All Phases") + "    " + helpStyle.Render("Per Phase") + "\n\n"
 			selected := modelConfig.Default
 			overlay += renderGroupedModelList(modelSections, ollamaRunning, selected, modelCursor)
 			overlay += "\n"
-			perPhaseCheck := "[ ]"
-			overlay += "  " + perPhaseCheck + " Configure per phase\n"
-			fbCheck := "[ ]"
-			if fallback.Enabled {
-				fbCheck = "[x]"
-			}
-			fbLabel := fbCheck + " Rate limit fallback"
-			if fallback.Enabled && fallback.Model != "" {
-				fbLabel += " → " + fallback.Model
-			}
-			overlay += "  " + fbLabel + "\n"
+			overlay += renderInlineFallback(showFallback, fallback, fbCursor, modelSections, ollamaRunning)
 			overlay += "\n" + helpStyle.Render("j/k: navigate  space: select  tab: per-phase  f: fallback  enter: next  esc: back")
 		}
 	case 4:
@@ -2332,6 +2330,62 @@ func renderGroupedModelList(sections []models.Section, ollamaRunning bool, selec
 }
 
 // renderFallbackConfig renders the fallback toggle and model picker.
+// renderInlineFallback renders the fallback model picker inline within the model selection step.
+func renderInlineFallback(show bool, fb stream.FallbackConfig, cursor int, sections []models.Section, ollamaRunning bool) string {
+	if !show {
+		label := helpStyle.Render("f: fallback")
+		if fb.Enabled && fb.Model != "" {
+			label = "Fallback → " + fb.Model
+		}
+		return "  " + label + "\n"
+	}
+
+	var b strings.Builder
+	b.WriteString("\n  " + helpStyle.Render("Fallback model") + "\n")
+
+	var ollamaItems []string
+	for _, sec := range sections {
+		if sec.Header == "Local (Ollama)" {
+			ollamaItems = sec.Items
+		}
+	}
+
+	if len(ollamaItems) == 0 {
+		b.WriteString("  " + helpStyle.Render("Automatic failover to a local model when the API rate-limits.") + "\n")
+		if ollamaRunning {
+			b.WriteString("  " + helpStyle.Render("No Ollama models installed. Run: ollama pull <model>") + "\n")
+		} else {
+			b.WriteString("  " + helpStyle.Render("Ollama not running. Install from ollama.com, then:") + "\n")
+			b.WriteString("  " + helpStyle.Render("  ollama serve && ollama pull <model>") + "\n")
+		}
+		return b.String()
+	}
+
+	if !ollamaRunning {
+		b.WriteString("  " + helpStyle.Render("Ollama") + " " + helpStyle.Render("○ not running") + "\n")
+	}
+
+	for i, opt := range ollamaItems {
+		cur := "  "
+		if i == cursor {
+			cur = cursorStyle.Render("> ")
+		}
+		radio := "○"
+		if opt == fb.Model {
+			radio = "●"
+		}
+		label := opt
+		if i == cursor {
+			label = selectedRowStyle.Render(radio + " " + label)
+		} else {
+			label = radio + " " + label
+		}
+		b.WriteString(cur + label + "\n")
+	}
+
+	return b.String()
+}
+
 func renderFallbackConfig(fb stream.FallbackConfig, cursor int, sections []models.Section, ollamaRunning bool) string {
 	var b strings.Builder
 
