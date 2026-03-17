@@ -119,7 +119,7 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 	var finalResult *cliResult
 	var textBuf strings.Builder
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()

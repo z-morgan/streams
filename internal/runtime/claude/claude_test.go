@@ -243,9 +243,9 @@ func TestRunMalformedJSON(t *testing.T) {
 func TestRunStreamingScannerError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fake-claude")
-	// Output a single line > 1MB to exceed the scanner's buffer limit,
+	// Output a single line > 10MB to exceed the scanner's buffer limit,
 	// triggering bufio.ErrTooLong.
-	script := "#!/bin/sh\ndd if=/dev/zero bs=1100000 count=1 2>/dev/null | tr '\\0' 'a'\n"
+	script := "#!/bin/sh\ndd if=/dev/zero bs=11000000 count=1 2>/dev/null | tr '\\0' 'a'\n"
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
