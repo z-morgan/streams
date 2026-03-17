@@ -141,6 +141,7 @@ type Model struct {
 	newStreamBreakpoints      map[int]bool          // which pipeline gaps have breakpoints
 	newStreamBPCursor         int                   // cursor into breakpoint gaps
 	newStreamNotify           stream.NotifySettings // notification toggles
+	newStreamOverlayWidth     int                   // dynamic overlay width for task step
 	creating                  bool                  // true while orch.Create is running
 
 	// Quit confirmation overlay state.
@@ -315,7 +316,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
 		m.height = msg.Height
-		m.newStreamInput.SetWidth(m.inputWidth())
+		m.autoSizeNewStreamInput()
 		return m, nil
 	}
 
@@ -573,7 +574,7 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.newStreamTitle.SetWidth(m.inputWidth())
 		m.newStreamTitle.Focus()
 		m.newStreamInput.Reset()
-		m.newStreamInput.SetWidth(m.inputWidth())
+		m.autoSizeNewStreamInput()
 		m.newStreamChecked = defaultPhaseChecks(m.orch.DefaultPipeline())
 		m.newStreamPhaseCur = 0
 		m.newStreamNotify = stream.NotifySettings{}
@@ -1121,7 +1122,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.newStreamStep = 2
 			return m, nil
 
-		case "alt+enter":
+		case "shift+enter":
 			if m.newStreamStep == 1 {
 				m.newStreamInput.InsertString("\n")
 				m.autoSizeNewStreamInput()
@@ -1934,7 +1935,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showHelp {
-		return renderHelpOverlay(m.helpScroll, m.width, m.height)
+		return renderHelpOverlay(m.helpScopes(), m.helpTitle(), m.helpScroll, m.width, m.height)
 	}
 
 	if m.showRestartPrompt {
@@ -1955,7 +1956,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -2071,7 +2072,7 @@ func (m Model) viewString() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth, width, height int) string {
 	var overlay string
 
 	totalSteps := 4
@@ -2092,7 +2093,8 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n\n"
 		overlay += "Task:\n"
 		overlay += taskInput.View() + "\n\n"
-		overlay += helpStyle.Render("enter: next  alt+enter: new line  esc: back")
+		overlay += helpStyle.Render(fmt.Sprintf("ow=%d tw=%d wlc=%d", taskOverlayWidth, taskInput.Width(), wrappedLineCount(taskInput.Value(), taskInput.Width())))
+		overlay += "\n" + helpStyle.Render("enter: next  shift+enter: new line  esc: back")
 	case 3:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
@@ -2107,7 +2109,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 				}
 				phaseModel := modelConfig.PerPhase[phaseName]
 				if phaseModel == "" {
-					phaseModel = "default"
+					phaseModel = "sonnet"
 				}
 				label := fmt.Sprintf("%-12s %s", phaseName, phaseModel)
 				if i == phaseModelCursor {
@@ -2131,9 +2133,6 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		} else {
 			overlay += "Select Model:\n\n"
 			selected := modelConfig.Default
-			if selected == "" {
-				selected = "default"
-			}
 			overlay += renderGroupedModelList(modelSections, ollamaRunning, selected, modelCursor)
 			overlay += "\n"
 			perPhaseCheck := "[ ]"
@@ -2200,7 +2199,11 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay += helpStyle.Render("\nj/k: navigate  space: toggle  enter: next  esc: back")
 	}
 
-	box := overlayStyle.Width(overlayWidth(width, 100)).Render(overlay)
+	ow := overlayWidth(width, 100)
+	if step == 1 && taskOverlayWidth > 0 {
+		ow = taskOverlayWidth
+	}
+	box := overlayStyle.Width(ow).Render(overlay)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -2265,7 +2268,7 @@ func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map
 				}
 				phaseModel := modelConfig.PerPhase[phaseName]
 				if phaseModel == "" {
-					phaseModel = "default"
+					phaseModel = "sonnet"
 				}
 				label := fmt.Sprintf("%-12s %s", phaseName, phaseModel)
 				if i == phaseModelCursor {
@@ -2277,9 +2280,6 @@ func renderStreamConfigOverlay(pipeline []string, activeTab int, breakpoints map
 			overlay += "\n" + helpStyle.Render("tab: switch section  j/k: navigate  h/l: cycle model  p: all-phases  enter: save  esc: cancel")
 		} else {
 			selected := modelConfig.Default
-			if selected == "" {
-				selected = "default"
-			}
 			overlay += renderGroupedModelList(modelSections, ollamaRunning, selected, modelCursor)
 			overlay += "\n  [ ] Configure per phase\n"
 			overlay += "\n" + helpStyle.Render("tab: switch section  j/k: navigate  space: select  p: per-phase  enter: save  esc: cancel")
@@ -2319,9 +2319,6 @@ func renderGroupedModelList(sections []models.Section, ollamaRunning bool, selec
 				radio = "●"
 			}
 			label := opt
-			if opt == "default" {
-				label += " (CLI default)"
-			}
 			if idx == cursor {
 				label = selectedRowStyle.Render(radio + " " + label)
 			} else {
@@ -2551,20 +2548,48 @@ func renderReviseOverlay(phases []string, cursor, step int, isRunning, replaceSe
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func renderHelpOverlay(scroll, width, height int) string {
-	// Scopes displayed in the modal, in order.
-	scopes := []Scope{
-		ScopeGlobal,
-		ScopeDashboard,
-		ScopeDetail,
-		ScopeDetailOutput,
-		ScopeBeadBrowse,
+// helpScopes returns the scopes relevant to the current view.
+func (m Model) helpScopes() []Scope {
+	switch m.view {
+	case viewDashboard:
+		if m.dashboard.mode == modeChannels {
+			return []Scope{ScopeDashboardChannels, ScopeGlobal}
+		}
+		return []Scope{ScopeDashboard, ScopeGlobal}
+	case viewDetail:
+		return []Scope{ScopeDetail, ScopeDetailOutput, ScopeBeadBrowse, ScopeGlobal}
+	default:
+		return []Scope{ScopeGlobal}
 	}
+}
 
+// helpTitle returns the overlay title based on the current view.
+func (m Model) helpTitle() string {
+	switch m.view {
+	case viewDashboard:
+		if m.dashboard.mode == modeChannels {
+			return "Channels Shortcuts"
+		}
+		return "Dashboard Shortcuts"
+	case viewDetail:
+		return "Inspect Shortcuts"
+	default:
+		return "Keyboard Shortcuts"
+	}
+}
+
+func renderHelpOverlay(scopes []Scope, title string, scroll, width, height int) string {
 	keyStyle := helpKeyStyle
-	actionStyle := helpActionStyle
-	conditionStyle := helpStyle
+	descStyle := helpActionStyle
 	headerStyle := overlayTitleStyle
+
+	// Determine max description width based on overlay width.
+	ow := overlayWidth(width, 80)
+	// key column (10) + spacing (4) + border/padding (~6) = 20 chars overhead
+	descWidth := ow - 20
+	if descWidth < 30 {
+		descWidth = 30
+	}
 
 	var lines []string
 	for i, scope := range scopes {
@@ -2574,14 +2599,26 @@ func renderHelpOverlay(scroll, width, height int) string {
 		lines = append(lines, headerStyle.Render(scope.Label()))
 
 		for _, b := range BindingsForScope(scope) {
-			action := b.Action
-			if b.Condition != "" {
-				action += conditionStyle.Render(" ("+b.Condition+")")
+			desc := b.Description
+			if desc == "" {
+				desc = b.Action
 			}
-			line := fmt.Sprintf("  %s  %s",
-				keyStyle.Width(10).Render(b.Key),
-				actionStyle.Render(action))
-			lines = append(lines, line)
+			// Word-wrap the description to fit the overlay width.
+			wrapped := wrapLines(desc, descWidth)
+			for j, wline := range wrapped {
+				if j == 0 {
+					line := fmt.Sprintf("  %s  %s",
+						keyStyle.Width(10).Render(b.Key),
+						descStyle.Render(wline))
+					lines = append(lines, line)
+				} else {
+					// Continuation line: indent past the key column.
+					line := fmt.Sprintf("  %s  %s",
+						keyStyle.Width(10).Render(""),
+						descStyle.Render(wline))
+					lines = append(lines, line)
+				}
+			}
 		}
 	}
 
@@ -2604,13 +2641,37 @@ func renderHelpOverlay(scroll, width, height int) string {
 	}
 	visible := lines[scroll:end]
 
-	overlay := overlayTitleStyle.Render("Keyboard Shortcuts") + "\n\n"
+	overlay := overlayTitleStyle.Render(title) + "\n\n"
 	overlay += strings.Join(visible, "\n")
 	overlay += "\n\n"
 	overlay += helpStyle.Render("esc or ? to close  j/k to scroll")
 
-	box := overlayStyle.Width(overlayWidth(width, 50)).Render(overlay)
+	box := overlayStyle.Width(ow).Render(overlay)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// wrapLines breaks text into lines of at most maxWidth characters, splitting
+// at word boundaries.
+func wrapLines(text string, maxWidth int) []string {
+	if maxWidth <= 0 {
+		return []string{text}
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	line := words[0]
+	for _, w := range words[1:] {
+		if len(line)+1+len(w) > maxWidth {
+			lines = append(lines, line)
+			line = w
+		} else {
+			line += " " + w
+		}
+	}
+	lines = append(lines, line)
+	return lines
 }
 
 // overlayWidth returns a capped overlay width. Standard overlays cap at 80,
@@ -2694,8 +2755,10 @@ func (m Model) inputWidth() int {
 	return w
 }
 
-// autoSizeNewStreamInput adjusts the task textarea height to fit its content,
-// capped so the overlay doesn't exceed the terminal height.
+// autoSizeNewStreamInput adjusts the task textarea width and height to fit its
+// content. It first tries the default overlay width (capped at 100), then
+// expands horizontally up to the terminal width before allowing vertical
+// scrolling.
 func (m *Model) autoSizeNewStreamInput() {
 	// Overlay chrome for step 1: title+step (1) + blank (1) + "Title: ..." (1) +
 	// blank (1) + "Task:" (1) + blank after textarea (1) + help line (1) +
@@ -2705,7 +2768,30 @@ func (m *Model) autoSizeNewStreamInput() {
 	if maxH < 3 {
 		maxH = 3
 	}
-	h := m.newStreamInput.LineCount()
+
+	// Start with the default overlay width (capped at 100).
+	ow := overlayWidth(m.width, 100)
+	contentW := ow - 6 // subtract border(2) + padding(4)
+	if contentW < 20 {
+		contentW = 20
+	}
+	m.newStreamInput.SetWidth(contentW)
+	h := wrappedLineCount(m.newStreamInput.Value(), m.newStreamInput.Width())
+
+	// If content fills or exceeds available height, expand the overlay
+	// horizontally. Using >= provides a buffer for word-wrap overhead that
+	// the estimate may miss.
+	if h >= maxH {
+		maxOW := overlayWidth(m.width, m.width)
+		contentW = maxOW - 6
+		if contentW < 20 {
+			contentW = 20
+		}
+		m.newStreamInput.SetWidth(contentW)
+		h = wrappedLineCount(m.newStreamInput.Value(), m.newStreamInput.Width())
+		ow = maxOW
+	}
+
 	if h < 3 {
 		h = 3
 	}
@@ -2713,6 +2799,40 @@ func (m *Model) autoSizeNewStreamInput() {
 		h = maxH
 	}
 	m.newStreamInput.SetHeight(h)
+	m.newStreamOverlayWidth = ow
+}
+
+// wrappedLineCount estimates the number of visual lines a text occupies when
+// word-wrapped at the given width. Mirrors the textarea's wrap behavior where
+// each word's trailing space is included in the line width calculation.
+func wrappedLineCount(text string, wrapWidth int) int {
+	if wrapWidth <= 0 {
+		return 1
+	}
+	total := 0
+	for _, line := range strings.Split(text, "\n") {
+		words := strings.Fields(line)
+		if len(words) == 0 {
+			total++
+			continue
+		}
+		// lineW tracks width including a trailing space after each word,
+		// matching how the textarea accumulates "word + space" per word.
+		lineW := 0
+		for _, word := range words {
+			w := lipgloss.Width(word)
+			if lineW == 0 {
+				lineW = w + 1
+			} else if lineW+w+1 > wrapWidth {
+				total++
+				lineW = w + 1
+			} else {
+				lineW += w + 1
+			}
+		}
+		total++ // count the last line
+	}
+	return total
 }
 
 // autoScrollChannels adjusts scrollLeft so the cursor stays in the visible window.
