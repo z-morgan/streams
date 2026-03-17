@@ -2125,13 +2125,22 @@ func (m Model) viewString() string {
 	case viewDashboard:
 		streams := m.orch.List()
 		m.dashboard.clampCursor(len(streams))
+
+		// Build active blocker counts for queued indicator.
+		activeBlockers := make(map[string]int)
+		for _, st := range streams {
+			if n := len(m.orch.ActiveBlockers(st.ID)); n > 0 {
+				activeBlockers[st.ID] = n
+			}
+		}
+
 		var body string
 		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 		switch m.dashboard.mode {
 		case modeChannels:
-			body = renderChannels(streams, m.dashboard.cursor, m.dashboard.scrollLeft, m.width, m.height, frame)
+			body = renderChannels(streams, m.dashboard.cursor, m.dashboard.scrollLeft, m.width, m.height, frame, activeBlockers)
 		default:
-			body = renderDashboardList(streams, m.dashboard.cursor, m.width, m.height, frame)
+			body = renderDashboardList(streams, m.dashboard.cursor, m.width, m.height, frame, activeBlockers)
 		}
 
 		var statusLine string

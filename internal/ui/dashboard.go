@@ -47,7 +47,7 @@ func (d *dashboardView) clampScroll(streamCount, visibleCols int) {
 	}
 }
 
-func renderDashboardList(streams []*stream.Stream, cursor int, width, height int, spinnerFrame string) string {
+func renderDashboardList(streams []*stream.Stream, cursor int, width, height int, spinnerFrame string, activeBlockers map[string]int) string {
 	if len(streams) == 0 {
 		return renderEmptyState(width, height-4)
 	}
@@ -93,7 +93,7 @@ func renderDashboardList(streams []*stream.Stream, cursor int, width, height int
 			style = selectedRowStyle
 		}
 
-		status := statusIndicator(st)
+		status := statusIndicator(st, activeBlockers[st.ID])
 		phase := currentPhase(st)
 		iter := fmt.Sprintf("iter %d", st.GetIteration())
 
@@ -195,7 +195,7 @@ func channelLayout(streamCount, termWidth int) (colWidth, visibleCols int) {
 }
 
 // renderChannel renders a single stream as a vertical column.
-func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, spinnerFrame string) string {
+func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, spinnerFrame string, activeBlockerCount int) string {
 	innerWidth := colWidth - 6 // border (2) + padding (2) + margin (2)
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -205,7 +205,7 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 	name := truncate(st.Name, innerWidth-2) // leave room for dot prefix
 	dot := statusDot(st)
 	phase := currentPhase(st)
-	label := statusLabel(st)
+	label := statusLabel(st, activeBlockerCount)
 
 	worktree := ""
 	if st.WorkTree != "" {
@@ -277,7 +277,7 @@ func renderChannel(st *stream.Stream, colWidth, availHeight int, selected bool, 
 	return borderStyle.Width(innerWidth + 2).Height(availHeight).Render(content)
 }
 
-func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int, spinnerFrame string) string {
+func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height int, spinnerFrame string, activeBlockers map[string]int) string {
 	var b strings.Builder
 
 	if len(streams) == 0 {
@@ -300,7 +300,7 @@ func renderChannels(streams []*stream.Stream, cursor, scrollLeft, width, height 
 	}
 
 	for i := scrollLeft; i < endIdx; i++ {
-		col := renderChannel(streams[i], colWidth, availHeight, i == cursor, spinnerFrame)
+		col := renderChannel(streams[i], colWidth, availHeight, i == cursor, spinnerFrame, activeBlockers[streams[i].ID])
 		columns = append(columns, col)
 	}
 
@@ -351,7 +351,11 @@ func statusDot(st *stream.Stream) string {
 }
 
 // statusLabel returns a short colored status text for the channel subtitle.
-func statusLabel(st *stream.Stream) string {
+func statusLabel(st *stream.Stream, activeBlockerCount int) string {
+	if activeBlockerCount > 0 {
+		return lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("queued (%d)", activeBlockerCount))
+	}
+
 	status := st.GetStatus()
 	name := status.String()
 	color, ok := statusColors[name]
@@ -374,7 +378,11 @@ func statusLabel(st *stream.Stream) string {
 	}
 }
 
-func statusIndicator(st *stream.Stream) string {
+func statusIndicator(st *stream.Stream, activeBlockerCount int) string {
+	if activeBlockerCount > 0 {
+		return lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("⏳ Queued (%d)", activeBlockerCount))
+	}
+
 	status := st.GetStatus()
 	name := status.String()
 	color, ok := statusColors[name]

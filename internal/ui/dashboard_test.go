@@ -89,7 +89,7 @@ func TestRenderChannel(t *testing.T) {
 			{Phase: "coding", Iteration: 0, Summary: "Added basic auth"},
 		})
 
-		result := renderChannel(st, 30, 20, false, "⠋")
+		result := renderChannel(st, 30, 20, false, "⠋", 0)
 
 		if !strings.Contains(result, "auth-refactor") {
 			t.Error("expected stream name in output")
@@ -107,7 +107,7 @@ func TestRenderChannel(t *testing.T) {
 			{Phase: "coding", Iteration: 0, Summary: "Hit error", Error: &stream.LoopError{Message: "fail"}},
 		})
 
-		result := renderChannel(st, 30, 20, false, "⠋")
+		result := renderChannel(st, 30, 20, false, "⠋", 0)
 
 		if !strings.Contains(result, "!") {
 			t.Error("expected error indicator '!' in output")
@@ -118,7 +118,7 @@ func TestRenderChannel(t *testing.T) {
 		st := makeStream("active", stream.StatusRunning, []string{"coding"}, 0, nil)
 		st.Iteration = 1
 
-		result := renderChannel(st, 30, 20, false, "⠋")
+		result := renderChannel(st, 30, 20, false, "⠋", 0)
 
 		if !strings.Contains(result, "⠋ coding 1") {
 			t.Errorf("expected in-progress spinner indicator, got:\n%s", result)
@@ -133,7 +133,7 @@ func TestRenderChannel(t *testing.T) {
 			{Phase: "coding", Iteration: 1, Summary: "next work"},
 		})
 
-		result := renderChannel(st, 30, 20, false, "⠋")
+		result := renderChannel(st, 30, 20, false, "⠋", 0)
 
 		if !strings.Contains(result, "coding 1") {
 			t.Error("expected coding 1")
@@ -154,7 +154,7 @@ func TestRenderChannel(t *testing.T) {
 		st := makeStream("long", stream.StatusPaused, []string{"coding"}, 0, snaps)
 
 		// availHeight=8 means maxRows=4, should only see last 4 (iterations 17-20)
-		result := renderChannel(st, 30, 8, false, "⠋")
+		result := renderChannel(st, 30, 8, false, "⠋", 0)
 
 		if strings.Contains(result, "coding 5") {
 			t.Error("expected early snapshots to be truncated")
@@ -250,7 +250,7 @@ func TestDefaultPhaseChecks(t *testing.T) {
 
 func TestRenderChannels(t *testing.T) {
 	t.Run("empty streams", func(t *testing.T) {
-		result := renderChannels(nil, 0, 0, 120, 40, "⠋")
+		result := renderChannels(nil, 0, 0, 120, 40, "⠋", nil)
 		if !strings.Contains(result, "No streams yet") {
 			t.Error("expected empty state message")
 		}
@@ -266,12 +266,12 @@ func TestRenderChannels(t *testing.T) {
 		}
 
 		// Width 60 fits ~2 columns at min 25 width
-		result := renderChannels(streams, 0, 0, 60, 30, "⠋")
+		result := renderChannels(streams, 0, 0, 60, 30, "⠋", nil)
 		if !strings.Contains(result, "▶") {
 			t.Error("expected right scroll indicator")
 		}
 
-		result = renderChannels(streams, 3, 2, 60, 30, "⠋")
+		result = renderChannels(streams, 3, 2, 60, 30, "⠋", nil)
 		if !strings.Contains(result, "◀") {
 			t.Error("expected left scroll indicator")
 		}
