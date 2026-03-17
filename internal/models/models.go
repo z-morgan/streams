@@ -14,7 +14,7 @@ import (
 )
 
 // Aliases are always available, regardless of API key.
-var Aliases = []string{"default", "sonnet", "opus", "haiku"}
+var Aliases = []string{"sonnet", "opus", "haiku"}
 
 // ModelEntry represents a discovered model from the API.
 type ModelEntry struct {
