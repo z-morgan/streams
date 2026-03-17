@@ -2100,7 +2100,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
 		if perPhase {
-			overlay += "Select Models per Phase:\n\n"
+			overlay += "  " + helpStyle.Render("All Phases") + "    " + selectedRowStyle.Render("Per Phase") + "\n\n"
 			selectedPipe := selectedPipeline(checked, phaseTree)
 			for i, phaseName := range selectedPipe {
 				cursor := "  "
@@ -2131,7 +2131,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 			overlay += "  " + fbLabel + "\n"
 			overlay += "\n" + helpStyle.Render("j/k: navigate phase  h/l: cycle model  tab: all-phases  f: fallback  enter: confirm  esc: back")
 		} else {
-			overlay += "Select Model:\n\n"
+			overlay += "  " + selectedRowStyle.Render("All Phases") + "    " + helpStyle.Render("Per Phase") + "\n\n"
 			selected := modelConfig.Default
 			overlay += renderGroupedModelList(modelSections, ollamaRunning, selected, modelCursor)
 			overlay += "\n"
@@ -2776,7 +2776,8 @@ func (m *Model) autoSizeNewStreamInput() {
 		contentW = 20
 	}
 	m.newStreamInput.SetWidth(contentW)
-	h := wrappedLineCount(m.newStreamInput.Value(), m.newStreamInput.Width())
+	// Add 1 to account for the textarea's cursor/viewport row overhead.
+	h := wrappedLineCount(m.newStreamInput.Value(), m.newStreamInput.Width()) + 1
 
 	// If content fills or exceeds available height, expand the overlay
 	// horizontally. Using >= provides a buffer for word-wrap overhead that
@@ -2788,7 +2789,7 @@ func (m *Model) autoSizeNewStreamInput() {
 			contentW = 20
 		}
 		m.newStreamInput.SetWidth(contentW)
-		h = wrappedLineCount(m.newStreamInput.Value(), m.newStreamInput.Width())
+		h = wrappedLineCount(m.newStreamInput.Value(), m.newStreamInput.Width()) + 1
 		ow = maxOW
 	}
 
