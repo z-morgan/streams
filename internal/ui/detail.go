@@ -49,6 +49,8 @@ type iterationRow struct {
 	IsRevision         bool            // first iteration after a revision
 	IsPendingRevise    bool            // informational row: a revise is queued
 	PendingRevisePhase string          // target phase name for the pending revise
+	IsGuidance         bool              // guidance injection indicator row
+	GuidanceItems      []stream.Guidance // guidance items (only set when IsGuidance)
 	Step               stream.IterStep // current step (only meaningful for in-progress rows)
 	SnapshotIndex      int             // -1 for non-snapshot rows
 }
@@ -66,6 +68,14 @@ func buildIterationList(st *stream.Stream) []iterationRow {
 	// Number snapshots sequentially per phase for display purposes.
 	phaseCount := make(map[string]int)
 	for i, snap := range snaps {
+		// Insert guidance indicator before snapshots that consumed guidance.
+		if len(snap.GuidanceConsumed) > 0 {
+			rows = append(rows, iterationRow{
+				IsGuidance:    true,
+				GuidanceItems: snap.GuidanceConsumed,
+				SnapshotIndex: -1,
+			})
+		}
 		phaseCount[snap.Phase]++
 		rows = append(rows, iterationRow{
 			Phase:         snap.Phase,
@@ -166,6 +176,9 @@ func renderDetail(st *stream.Stream, dv detailView, width, height int, spinnerFr
 			if dv.beadFocused && dv.beadShowOutput != "" {
 				rightTitle = "Beads"
 				right = wrapText(dv.beadShowOutput, innerRight)
+			} else if row.IsGuidance {
+				rightTitle = "Guidance"
+				right = renderGuidanceDetail(row.GuidanceItems, innerRight)
 			} else if row.IsInitialPrompt {
 				rightTitle = "Prompt"
 				right = wrapText(st.Task, innerRight)
@@ -369,7 +382,11 @@ func renderIterationList(rows []iterationRow, cursor int, width int, dimmed bool
 			continue
 		}
 
-		if row.IsInitialPrompt {
+		if row.IsGuidance {
+			label = "Guidance"
+			icon = "▸"
+			iconColor = colorHighlight
+		} else if row.IsInitialPrompt {
 			label = "Initial Prompt"
 		} else {
 			label = fmt.Sprintf("%s %d", row.Phase, row.Iteration+1)
@@ -563,6 +580,24 @@ func renderSnapshotDetail(snaps []stream.Snapshot, cursor int, width int, beadFo
 		b.WriteString(renderErrorBlock(snap.Error, snaps))
 	}
 
+	return b.String()
+}
+
+func renderGuidanceDetail(items []stream.Guidance, width int) string {
+	var b strings.Builder
+	hr := helpStyle.Render(strings.Repeat("─", width))
+
+	b.WriteString(labelStyle.Render("Guidance Injected"))
+	b.WriteString("\n" + hr + "\n")
+	for i, g := range items {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		ts := helpStyle.Render(g.Timestamp.Format("15:04:05"))
+		b.WriteString(ts + "\n")
+		b.WriteString(wrapText(g.Text, width))
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

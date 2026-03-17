@@ -76,7 +76,7 @@ func (p *ReviewPhase) BeforeReview(_ PhaseContext) error {
 }
 
 func (p *ReviewPhase) TransitionMode() Transition {
-	return TransitionPause
+	return TransitionAutoAdvance
 }
 
 func (p *ReviewPhase) ArtifactFile() string { return "" }
