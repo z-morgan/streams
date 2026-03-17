@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -143,6 +144,31 @@ func TestBindingsCoverage(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAllBindingsHaveDescription(t *testing.T) {
+	for i, b := range Bindings {
+		if b.Description == "" {
+			t.Errorf("Bindings[%d] (key=%q, scope=%s) has empty Description", i, b.Key, b.Scope.Label())
+		}
+	}
+}
+
+func TestHelpBarTextIncludesGlobalBindings(t *testing.T) {
+	text := HelpBarText(ScopeDashboard, nil)
+	if !strings.Contains(text, "?: this help") {
+		t.Errorf("HelpBarText(ScopeDashboard) should include global ? binding, got: %s", text)
+	}
+	if !strings.Contains(text, "ctrl+c: quit") {
+		t.Errorf("HelpBarText(ScopeDashboard) should include global ctrl+c binding, got: %s", text)
+	}
+
+	// Global scope alone should not duplicate.
+	globalText := HelpBarText(ScopeGlobal, nil)
+	count := strings.Count(globalText, "?")
+	if count != 1 {
+		t.Errorf("HelpBarText(ScopeGlobal) should contain ? exactly once, got %d in: %s", count, globalText)
 	}
 }
 
