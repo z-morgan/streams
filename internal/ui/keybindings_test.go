@@ -37,6 +37,7 @@ var handledKeys = map[string]struct {
 			"d",
 			"D",
 			"g",
+			"b",
 			"v",
 			"h", "l", "left", "right",
 			"q",

@@ -147,6 +147,7 @@ type Stream struct {
 	PauseRequested  bool           // set by UI; loop checks at safe points and pauses gracefully
 	PendingRevise   *PendingRevise // queued revise for running streams
 	Models          ModelConfig    // per-phase model selections
+	BlockedBy       []string       // stream IDs whose completion/pause unblocks this stream
 	Fallback        FallbackConfig // rate limit fallback configuration
 	Notify          NotifySettings // notification preferences for converge/error events
 	MCPConfigPath   string              // absolute path to .streams/mcp.json (empty = no MCP)
@@ -546,6 +547,22 @@ func (s *Stream) SetFallback(fc FallbackConfig) {
 	s.Fallback = fc
 	s.UpdatedAt = time.Now()
 	s.mu.Unlock()
+}
+
+func (s *Stream) SetBlockedBy(ids []string) {
+	s.mu.Lock()
+	s.BlockedBy = make([]string, len(ids))
+	copy(s.BlockedBy, ids)
+	s.UpdatedAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Stream) GetBlockedBy() []string {
+	s.mu.RLock()
+	ids := make([]string, len(s.BlockedBy))
+	copy(ids, s.BlockedBy)
+	s.mu.RUnlock()
+	return ids
 }
 
 func (s *Stream) GetFallback() FallbackConfig {

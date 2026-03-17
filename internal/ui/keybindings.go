@@ -77,6 +77,7 @@ var Bindings = []KeyBinding{
 	{Key: "d", Action: "delete", Description: "Delete the selected stream permanently. Only available when the stream is stopped.", Scope: ScopeDashboard},
 	{Key: "D", Action: "diagnose", Description: "Launch a diagnostic Claude session in a new terminal tab for the selected stream.", Scope: ScopeDashboard},
 	{Key: "g", Action: "guidance", Description: "Queue a guidance message for the selected stream. The message is delivered at the next iteration boundary.", Scope: ScopeDashboard},
+	{Key: "b", Action: "blockers", Description: "Set blocker dependencies for the selected stream. Blocked streams auto-start when all blockers stop running.", Scope: ScopeDashboard},
 	{Key: "v", Action: "channels", Description: "Switch to the channels view, which displays streams organized by channel in a grid.", Scope: ScopeDashboard},
 	{Key: "q", Action: "quit", Description: "Quit the application. Prompts for confirmation if streams are running.", Scope: ScopeDashboard},
 
@@ -90,6 +91,7 @@ var Bindings = []KeyBinding{
 	{Key: "d", Action: "delete", Description: "Delete the selected stream permanently. Only available when the stream is stopped.", Scope: ScopeDashboardChannels},
 	{Key: "D", Action: "diagnose", Description: "Launch a diagnostic Claude session in a new terminal tab for the selected stream.", Scope: ScopeDashboardChannels},
 	{Key: "g", Action: "guidance", Description: "Queue a guidance message for the selected stream. The message is delivered at the next iteration boundary.", Scope: ScopeDashboardChannels},
+	{Key: "b", Action: "blockers", Description: "Set blocker dependencies for the selected stream. Blocked streams auto-start when all blockers stop running.", Scope: ScopeDashboardChannels},
 	{Key: "v", Action: "list", Description: "Switch back to the list view.", Scope: ScopeDashboardChannels},
 	{Key: "q", Action: "quit", Description: "Quit the application. Prompts for confirmation if streams are running.", Scope: ScopeDashboardChannels},
 
