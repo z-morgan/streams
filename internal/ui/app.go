@@ -134,6 +134,7 @@ type Model struct {
 	newStreamBreakpoints      map[int]bool          // which pipeline gaps have breakpoints
 	newStreamBPCursor         int                   // cursor into breakpoint gaps
 	newStreamNotify           stream.NotifySettings // notification toggles
+	newStreamTemplate         string                // selected template name
 	newStreamOverlayWidth     int                   // dynamic overlay width for task step
 	creating                  bool                  // true while orch.Create is running
 
@@ -152,6 +153,7 @@ type Model struct {
 	pendingBreakpoints []int                 // breakpoints stashed while waiting for stealth answer
 	pendingNotify      stream.NotifySettings // notify settings stashed while waiting for stealth answer
 	pendingModels      stream.ModelConfig    // model config stashed while waiting for stealth answer
+	pendingTemplate    string                // template name stashed while waiting for stealth answer
 
 	// Stream config overlay state (replaces edit breakpoints).
 	showStreamConfig     bool
@@ -435,9 +437,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		breakpoints := m.pendingBreakpoints
 		notify := m.pendingNotify
 		modelConfig := m.pendingModels
+		template := m.pendingTemplate
 		orch := m.orch
 		return m, func() tea.Msg {
-			st, err := orch.Create(title, task, pipeline, breakpoints, notify, modelConfig)
+			st, err := orch.Create(title, task, pipeline, breakpoints, notify, template, modelConfig)
 			return streamCreatedMsg{stream: st, err: err}
 		}
 
@@ -1342,7 +1345,7 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.newStreamBPCursor = 0
 				return m, nil
 			}
-			return m.createStream(pipeline, nil)
+			return m.createStream(pipeline, nil, m.newStreamTemplate)
 		}
 	}
 
@@ -1403,7 +1406,7 @@ func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
 					breakpoints = append(breakpoints, i)
 				}
 			}
-			return m.createStream(pipeline, breakpoints)
+			return m.createStream(pipeline, breakpoints, m.newStreamTemplate)
 		}
 	}
 
@@ -1595,7 +1598,7 @@ func (m Model) updateStreamConfigFallback(msg tea.KeyPressMsg) (tea.Model, tea.C
 	return m, nil
 }
 
-func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, tea.Cmd) {
+func (m Model) createStream(pipeline []string, breakpoints []int, template string) (tea.Model, tea.Cmd) {
 	title := m.newStreamTitle.Value()
 	task := m.newStreamInput.Value()
 	notify := m.newStreamNotify
@@ -1610,13 +1613,14 @@ func (m Model) createStream(pipeline []string, breakpoints []int) (tea.Model, te
 		m.pendingBreakpoints = breakpoints
 		m.pendingNotify = notify
 		m.pendingModels = modelConfig
+		m.pendingTemplate = template
 		m.showBeadsInit = true
 		return m, nil
 	}
 	m.creating = true
 	orch := m.orch
 	return m, func() tea.Msg {
-		st, err := orch.Create(title, task, pipeline, breakpoints, notify, modelConfig)
+		st, err := orch.Create(title, task, pipeline, breakpoints, notify, template, modelConfig)
 		if err == nil && (fallbackConfig.Enabled || fallbackConfig.Model != "") {
 			st.SetFallback(fallbackConfig)
 		}
@@ -1648,6 +1652,7 @@ func (m Model) updateBeadsInit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingTask = ""
 			m.pendingNotify = stream.NotifySettings{}
 			m.pendingModels = stream.ModelConfig{}
+			m.pendingTemplate = ""
 			return m, nil
 		}
 	}
