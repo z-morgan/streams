@@ -13,6 +13,7 @@ const (
 	ErrInfra                          // Disk, git worktree, beads CLI failure
 	ErrMaxIterations                  // Iteration limit reached
 	ErrRateLimit                      // API rate limit or usage cap hit
+	ErrUnavailable                    // Model temporarily unavailable (5xx server error)
 )
 
 var errorKindNames = [...]string{
@@ -23,6 +24,7 @@ var errorKindNames = [...]string{
 	"Infra",
 	"MaxIterations",
 	"RateLimit",
+	"Unavailable",
 }
 
 func (k ErrorKind) String() string {
