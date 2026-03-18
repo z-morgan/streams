@@ -14,23 +14,9 @@ import (
 	"github.com/zmorgan/streams/internal/stream"
 )
 
-// PhaseNode defines a phase that can be selected when creating a stream.
-// Children are nested under their parent (e.g., decompose under plan).
-type PhaseNode struct {
-	Name     string
-	Children []PhaseNode
-}
-
-// phaseTree defines the available phases and their nesting.
-var phaseTree = []PhaseNode{
-	{Name: "research"},
-	{Name: "plan", Children: []PhaseNode{
-		{Name: "decompose"},
-	}},
-	{Name: "coding"},
-	{Name: "review"},
-	{Name: "polish"},
-}
+// phaseTree is the default phase tree, derived from the Classic builtin template.
+// Used as a fallback when no template is selected.
+var phaseTree = stream.BuiltinTemplates()[0].Phases
 
 // flatPhase is a flattened view of the phase tree for cursor navigation.
 type flatPhase struct {
@@ -39,7 +25,7 @@ type flatPhase struct {
 }
 
 // flattenPhaseTree returns a flat list of phases with depth info for rendering.
-func flattenPhaseTree(nodes []PhaseNode, depth int) []flatPhase {
+func flattenPhaseTree(nodes []stream.PhaseNode, depth int) []flatPhase {
 	var result []flatPhase
 	for _, node := range nodes {
 		result = append(result, flatPhase{Name: node.Name, Depth: depth})
@@ -49,7 +35,7 @@ func flattenPhaseTree(nodes []PhaseNode, depth int) []flatPhase {
 }
 
 // childPhases returns the names of all children (recursive) of the given phase.
-func childPhases(nodes []PhaseNode, parent string) []string {
+func childPhases(nodes []stream.PhaseNode, parent string) []string {
 	for _, node := range nodes {
 		if node.Name == parent {
 			return collectNames(node.Children)
@@ -61,7 +47,7 @@ func childPhases(nodes []PhaseNode, parent string) []string {
 	return nil
 }
 
-func collectNames(nodes []PhaseNode) []string {
+func collectNames(nodes []stream.PhaseNode) []string {
 	var names []string
 	for _, node := range nodes {
 		names = append(names, node.Name)
@@ -71,7 +57,7 @@ func collectNames(nodes []PhaseNode) []string {
 }
 
 // selectedPipeline builds an ordered pipeline from the checked phases.
-func selectedPipeline(checked map[string]bool, nodes []PhaseNode) []string {
+func selectedPipeline(checked map[string]bool, nodes []stream.PhaseNode) []string {
 	var result []string
 	for _, node := range nodes {
 		if checked[node.Name] {
