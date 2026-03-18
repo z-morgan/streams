@@ -143,20 +143,21 @@ type Stream struct {
 	LastError       *LoopError
 	Snapshots       []Snapshot
 	Guidance        []Guidance
-	ConvergeASAP    bool           // one-shot flag: skip next review to force convergence
-	PauseRequested  bool           // set by UI; loop checks at safe points and pauses gracefully
-	PendingRevise   *PendingRevise // queued revise for running streams
-	Models          ModelConfig    // per-phase model selections
-	BlockedBy       []string       // stream IDs whose completion/pause unblocks this stream
-	Fallback        FallbackConfig // rate limit fallback configuration
-	Notify          NotifySettings // notification preferences for converge/error events
-	MCPConfigPath   string              // absolute path to .streams/mcp.json (empty = no MCP)
-	EnvironmentPort int                 // host port for containerized app server (0 = no environment)
-	Convergence       convergence.Config   // per-stream convergence overrides
-	SectionTracker    *convergence.Tracker // per-phase section tracking state (transient, not persisted in stream.json)
-	OutputLines       []string            // ring buffer of recent CLI output for tail view
-	reviseFrom      string         // transient: phase name we revised FROM (consumed by next snapshot)
-	reviseFeedback  string         // transient: user feedback that triggered the revision
+	ConvergeASAP    bool                 // one-shot flag: skip next review to force convergence
+	PauseRequested  bool                 // set by UI; loop checks at safe points and pauses gracefully
+	PendingRevise   *PendingRevise       // queued revise for running streams
+	Models          ModelConfig          // per-phase model selections
+	BlockedBy       []string             // stream IDs whose completion/pause unblocks this stream
+	Fallback        FallbackConfig       // rate limit fallback configuration
+	Notify          NotifySettings       // notification preferences for converge/error events
+	Template        string               // template name used at creation time (informational)
+	MCPConfigPath   string               // absolute path to .streams/mcp.json (empty = no MCP)
+	EnvironmentPort int                  // host port for containerized app server (0 = no environment)
+	Convergence     convergence.Config   // per-stream convergence overrides
+	SectionTracker  *convergence.Tracker // per-phase section tracking state (transient, not persisted in stream.json)
+	OutputLines     []string             // ring buffer of recent CLI output for tail view
+	reviseFrom      string               // transient: phase name we revised FROM (consumed by next snapshot)
+	reviseFeedback  string               // transient: user feedback that triggered the revision
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -419,6 +420,13 @@ func (s *Stream) DrainPendingRevise() *PendingRevise {
 	s.PendingRevise = nil
 	s.mu.Unlock()
 	return pr
+}
+
+func (s *Stream) GetTemplate() string {
+	s.mu.RLock()
+	t := s.Template
+	s.mu.RUnlock()
+	return t
 }
 
 func (s *Stream) SetMCPConfigPath(path string) {
