@@ -121,7 +121,7 @@ type Model struct {
 	showNewStream             bool
 	newStreamTitle            textarea.Model
 	newStreamInput            textarea.Model
-	newStreamStep             int                   // 0 = title, 1 = task, 2 = phases, 3 = models, 4 = breakpoints
+	newStreamStep             int                   // 0 = title, 1 = task, 2 = template, 3 = phases, 4 = models, 5 = breakpoints
 	newStreamPhaseCur         int                   // cursor into flattened phase list
 	newStreamChecked          map[string]bool       // which phases are checked
 	newStreamModelCursor      int                   // cursor into model list
@@ -134,6 +134,8 @@ type Model struct {
 	newStreamBreakpoints      map[int]bool          // which pipeline gaps have breakpoints
 	newStreamBPCursor         int                   // cursor into breakpoint gaps
 	newStreamNotify           stream.NotifySettings // notification toggles
+	newStreamTemplates        []stream.Template     // available templates (populated on "n" press)
+	newStreamTemplateCur      int                   // cursor into template list
 	newStreamTemplate         string                // selected template name
 	newStreamOverlayWidth     int                   // dynamic overlay width for task step
 	creating                  bool                  // true while orch.Create is running
@@ -576,7 +578,10 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.newStreamTitle.Focus()
 		m.newStreamInput.Reset()
 		m.autoSizeNewStreamInput()
-		m.newStreamChecked = defaultPhaseChecks(m.orch.DefaultPipeline())
+		m.newStreamTemplates = stream.BuiltinTemplates()
+		m.newStreamTemplateCur = 0
+		m.newStreamTemplate = ""
+		m.newStreamChecked = make(map[string]bool)
 		m.newStreamPhaseCur = 0
 		m.newStreamNotify = stream.NotifySettings{}
 		return m, textarea.Blink
@@ -1109,14 +1114,17 @@ func (m Model) updateDetailBeadBrowse(msg tea.KeyPressMsg, st *stream.Stream, ro
 }
 
 func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.newStreamStep == 4 {
+	if m.newStreamStep == 5 {
 		return m.updateNewStreamBreakpoints(msg)
 	}
-	if m.newStreamStep == 3 {
+	if m.newStreamStep == 4 {
 		return m.updateNewStreamModels(msg)
 	}
-	if m.newStreamStep == 2 {
+	if m.newStreamStep == 3 {
 		return m.updateNewStreamPipeline(msg)
+	}
+	if m.newStreamStep == 2 {
+		return m.updateNewStreamTemplate(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -1146,6 +1154,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.newStreamStep = 2
+			m.newStreamTemplateCur = 0
 			return m, nil
 
 		case "shift+enter":
@@ -1170,9 +1179,7 @@ func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
-	flat := flattenPhaseTree(phaseTree, 0)
-
+func (m Model) updateNewStreamTemplate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -1180,6 +1187,45 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.newStreamStep = 1
 			m.newStreamInput.Focus()
 			return m, textarea.Blink
+
+		case "j", "down":
+			if m.newStreamTemplateCur < len(m.newStreamTemplates)-1 {
+				m.newStreamTemplateCur++
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.newStreamTemplateCur > 0 {
+				m.newStreamTemplateCur--
+			}
+			return m, nil
+
+		case "enter":
+			if len(m.newStreamTemplates) == 0 {
+				return m, nil
+			}
+			selected := m.newStreamTemplates[m.newStreamTemplateCur]
+			m.newStreamTemplate = selected.Name
+			m.newStreamChecked = make(map[string]bool)
+			m.newStreamPhaseCur = 0
+			m.newStreamStep = 3
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
+func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
+	phases := m.selectedTemplatePhases()
+	flat := flattenPhaseTree(phases, 0)
+
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc":
+			m.newStreamStep = 2
+			return m, nil
 
 		case "j", "down":
 			if m.newStreamPhaseCur < len(flat)-1 {
@@ -1196,26 +1242,24 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "space":
 			name := flat[m.newStreamPhaseCur].Name
 			if m.newStreamChecked[name] {
-				// Unchecking: also uncheck children
 				m.newStreamChecked[name] = false
-				for _, child := range childPhases(phaseTree, name) {
+				for _, child := range childPhases(phases, name) {
 					m.newStreamChecked[child] = false
 				}
 			} else {
-				// Checking: also check children
 				m.newStreamChecked[name] = true
-				for _, child := range childPhases(phaseTree, name) {
+				for _, child := range childPhases(phases, name) {
 					m.newStreamChecked[child] = true
 				}
 			}
 			return m, nil
 
 		case "enter":
-			pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
+			pipeline := selectedPipeline(m.newStreamChecked, phases)
 			if len(pipeline) == 0 {
 				return m, nil
 			}
-			m.newStreamStep = 3
+			m.newStreamStep = 4
 			m.newStreamModelCursor = 0
 			m.newStreamModels = stream.ModelConfig{}
 			m.newStreamPerPhase = false
@@ -1226,15 +1270,24 @@ func (m Model) updateNewStreamPipeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// selectedTemplatePhases returns the phase tree for the currently selected template.
+func (m Model) selectedTemplatePhases() []stream.PhaseNode {
+	t := stream.FindTemplate(m.newStreamTemplate, m.newStreamTemplates)
+	if t != nil {
+		return t.Phases
+	}
+	return phaseTree
+}
+
 func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 	modelOptions := m.modelFetcher.AllOptions()
-	pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
+	pipeline := selectedPipeline(m.newStreamChecked, m.selectedTemplatePhases())
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
-			m.newStreamStep = 2
+			m.newStreamStep = 3
 			return m, nil
 
 		case "tab":
@@ -1340,7 +1393,7 @@ func (m Model) updateNewStreamModels(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.newStreamModels.Default = ""
 			}
 			if len(pipeline) > 1 {
-				m.newStreamStep = 4
+				m.newStreamStep = 5
 				m.newStreamBreakpoints = make(map[int]bool)
 				m.newStreamBPCursor = 0
 				return m, nil
@@ -1363,14 +1416,14 @@ func modelOptionIndex(options []string, value string) int {
 }
 
 func (m Model) updateNewStreamBreakpoints(msg tea.Msg) (tea.Model, tea.Cmd) {
-	pipeline := selectedPipeline(m.newStreamChecked, phaseTree)
+	pipeline := selectedPipeline(m.newStreamChecked, m.selectedTemplatePhases())
 	gapCount := len(pipeline) - 1
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
-			m.newStreamStep = 3
+			m.newStreamStep = 4
 			return m, nil
 
 		case "j", "down":
@@ -2054,7 +2107,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamShowFallback, m.newStreamFBCursor, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamTemplates, m.newStreamTemplateCur, m.newStreamTemplate, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamShowFallback, m.newStreamFBCursor, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -2183,13 +2236,19 @@ func (m Model) viewString() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, showFallback bool, fbCursor int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step int, templates []stream.Template, templateCursor int, selectedTemplate string, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, showFallback bool, fbCursor int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth, width, height int) string {
 	var overlay string
 
-	totalSteps := 4
-	pipeline := selectedPipeline(checked, phaseTree)
+	// Resolve template phases for steps that need pipeline info.
+	templatePhases := phaseTree
+	if t := stream.FindTemplate(selectedTemplate, templates); t != nil {
+		templatePhases = t.Phases
+	}
+	pipeline := selectedPipeline(checked, templatePhases)
+
+	totalSteps := 5
 	if len(pipeline) > 1 {
-		totalSteps = 5
+		totalSteps = 6
 	}
 	stepLabel := helpStyle.Render(fmt.Sprintf("  Step %d of %d", step+1, totalSteps))
 
@@ -2205,14 +2264,54 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		overlay += "Task:\n"
 		overlay += taskInput.View() + "\n\n"
 		overlay += helpStyle.Render("enter: next  shift+enter: new line  esc: back")
+	case 2:
+		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
+		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
+		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
+		overlay += "Template:\n"
+		for i, tmpl := range templates {
+			cursor := "  "
+			if i == templateCursor {
+				cursor = cursorStyle.Render("> ")
+			}
+			name := tmpl.Name
+			if i == templateCursor {
+				name = selectedRowStyle.Render(name)
+			}
+			overlay += cursor + name + "\n"
+			overlay += "    " + helpStyle.Render(tmpl.Description) + "\n"
+		}
+		overlay += "\n" + helpStyle.Render("j/k: navigate  enter: select  esc: back")
 	case 3:
+		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
+		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
+		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
+		overlay += "Phases " + helpStyle.Render("("+selectedTemplate+")") + ":\n"
+		flat := flattenPhaseTree(templatePhases, 0)
+		for i, fp := range flat {
+			cursor := "  "
+			if i == phaseCursor {
+				cursor = cursorStyle.Render("> ")
+			}
+			indent := strings.Repeat("  ", fp.Depth)
+			check := "[ ] "
+			if checked[fp.Name] {
+				check = "[x] "
+			}
+			label := fp.Name
+			if i == phaseCursor {
+				label = selectedRowStyle.Render(label)
+			}
+			overlay += cursor + indent + check + label + "\n"
+		}
+		overlay += helpStyle.Render("\nj/k: navigate  space: toggle  enter: next  esc: back")
+	case 4:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
 		if perPhase {
 			overlay += "  " + helpStyle.Render("All Phases") + "    " + selectedRowStyle.Render("Per Phase") + "\n\n"
-			selectedPipe := selectedPipeline(checked, phaseTree)
-			for i, phaseName := range selectedPipe {
+			for i, phaseName := range pipeline {
 				cursor := "  "
 				if i == phaseModelCursor {
 					cursor = cursorStyle.Render("> ")
@@ -2238,7 +2337,7 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 			overlay += renderInlineFallback(showFallback, fallback, fbCursor, modelSections, ollamaRunning)
 			overlay += "\n" + helpStyle.Render("j/k: navigate  space: select  tab: per-phase  f: fallback  enter: next  esc: back")
 		}
-	case 4:
+	case 5:
 		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
 		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
 		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
@@ -2264,29 +2363,6 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step, phaseCur
 		}
 		overlay += "\n" + renderNotifyToggles(notify) + "\n"
 		overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
-	default:
-		overlay = overlayTitleStyle.Render("New Stream") + stepLabel + "\n\n"
-		overlay += helpStyle.Render("Title: "+titleInput.Value()) + "\n"
-		overlay += helpStyle.Render("Task: "+taskInput.Value()) + "\n\n"
-		overlay += "Phases:\n"
-		flat := flattenPhaseTree(phaseTree, 0)
-		for i, fp := range flat {
-			cursor := "  "
-			if i == phaseCursor {
-				cursor = cursorStyle.Render("> ")
-			}
-			indent := strings.Repeat("  ", fp.Depth)
-			check := "[ ] "
-			if checked[fp.Name] {
-				check = "[x] "
-			}
-			label := fp.Name
-			if i == phaseCursor {
-				label = selectedRowStyle.Render(label)
-			}
-			overlay += cursor + indent + check + label + "\n"
-		}
-		overlay += helpStyle.Render("\nj/k: navigate  space: toggle  enter: next  esc: back")
 	}
 
 	ow := overlayWidth(width, 100)
