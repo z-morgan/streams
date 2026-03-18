@@ -180,11 +180,11 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 				return
 			}
 			kind := classifyError(err)
-			if kind == stream.ErrRateLimit {
+			if isFallbackEligible(kind) {
 				fb := s.GetFallback()
 				if fb.Enabled && fb.Model != "" {
-					s.AppendOutput(fmt.Sprintf("[streams] Rate limit hit — falling back to %s", fb.Model))
-					slog.Info("rate limit fallback", "stream", s.ID, "fallbackModel", fb.Model)
+					s.AppendOutput(fallbackMessage(kind, fb.Model))
+					slog.Info("model unavailable fallback", "stream", s.ID, "kind", kind, "fallbackModel", fb.Model)
 					fbReq := buildRequest(implPrompt, phase.ImplementTools(), s.GetEnvironmentPort(), fb.Model, mcpConfigPath, mcpToolPatterns)
 					fbReq.OnOutput = func(line string) { s.AppendOutput(line) }
 					implResp, err = rt.Run(ctx, fbReq)
@@ -334,11 +334,11 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 						return
 					}
 					kind := classifyError(err)
-					if kind == stream.ErrRateLimit {
+					if isFallbackEligible(kind) {
 						fb := s.GetFallback()
 						if fb.Enabled && fb.Model != "" {
-							s.AppendOutput(fmt.Sprintf("[streams] Rate limit hit — falling back to %s", fb.Model))
-							slog.Info("rate limit fallback (review)", "stream", s.ID, "fallbackModel", fb.Model)
+							s.AppendOutput(fallbackMessage(kind, fb.Model))
+							slog.Info("model unavailable fallback (review)", "stream", s.ID, "kind", kind, "fallbackModel", fb.Model)
 							fbReq := buildRequest(reviewPrompt, phase.ReviewTools(), s.GetEnvironmentPort(), fb.Model, mcpConfigPath, mcpToolPatterns)
 							fbReq.OnOutput = func(line string) { s.AppendOutput(line) }
 							reviewResp, err = rt.Run(ctx, fbReq)
@@ -640,12 +640,30 @@ func classifyError(err error) stream.ErrorKind {
 	if strings.Contains(msg, "budget") {
 		return stream.ErrBudget
 	}
-	for _, s := range []string{"rate limit", "rate_limit", "429", "overloaded", "too many requests", "usage limit", "hit your limit"} {
+	for _, s := range []string{"rate limit", "rate_limit", "429", "too many requests", "usage limit", "hit your limit"} {
 		if strings.Contains(msg, s) {
 			return stream.ErrRateLimit
 		}
 	}
+	for _, s := range []string{"overloaded", "500", "internal server error", "503", "service unavailable", "529"} {
+		if strings.Contains(msg, s) {
+			return stream.ErrUnavailable
+		}
+	}
 	return stream.ErrRuntime
+}
+
+func isFallbackEligible(kind stream.ErrorKind) bool {
+	return kind == stream.ErrRateLimit || kind == stream.ErrUnavailable
+}
+
+func fallbackMessage(kind stream.ErrorKind, model string) string {
+	switch kind {
+	case stream.ErrRateLimit:
+		return fmt.Sprintf("[streams] Model unavailable (rate limit) — falling back to %s", model)
+	default:
+		return fmt.Sprintf("[streams] Model unavailable (server error) — falling back to %s", model)
+	}
 }
 
 // buildMaxIterDiagnostic generates a detail string for MaxIterations errors
@@ -806,6 +824,24 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 				return
 			}
 			kind := classifyError(err)
+			if isFallbackEligible(kind) {
+				fb := s.GetFallback()
+				if fb.Enabled && fb.Model != "" {
+					s.AppendOutput(fallbackMessage(kind, fb.Model))
+					slog.Info("model unavailable fallback (slot)", "stream", s.ID, "slot", slot.Name, "kind", kind, "fallbackModel", fb.Model)
+					fbReq := buildRequest(prompt, slot.Tools, s.GetEnvironmentPort(), fb.Model, mcpConfigPath, mcpToolPatterns)
+					fbReq.OnOutput = func(line string) { s.AppendOutput(line) }
+					resp, err = rt.Run(ctx, fbReq)
+					if err == nil {
+						goto slotSucceeded
+					}
+					if ctx.Err() != nil {
+						s.SetStatus(stream.StatusStopped)
+						return
+					}
+					kind = classifyError(err)
+				}
+			}
 			slotErr := &stream.LoopError{
 				Kind:    kind,
 				Step:    stream.StepImplement,
@@ -828,6 +864,7 @@ func runSlots(ctx context.Context, s *stream.Stream, phase SlottedPhase, rt runt
 			}
 			continue
 		}
+slotSucceeded:
 
 		if resp.SessionID != "" {
 			s.SetSessionID(resp.SessionID)
