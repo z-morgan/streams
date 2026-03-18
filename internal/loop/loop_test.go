@@ -14,8 +14,9 @@ import (
 
 // mockRuntime returns configurable responses/errors per call.
 type mockRuntime struct {
-	calls   int
-	results []mockResult
+	calls    int
+	requests []runtime.Request
+	results  []mockResult
 }
 
 type mockResult struct {
@@ -23,7 +24,8 @@ type mockResult struct {
 	err  error
 }
 
-func (m *mockRuntime) Run(_ context.Context, _ runtime.Request) (*runtime.Response, error) {
+func (m *mockRuntime) Run(_ context.Context, req runtime.Request) (*runtime.Response, error) {
+	m.requests = append(m.requests, req)
 	i := m.calls
 	m.calls++
 	if i < len(m.results) {
@@ -633,5 +635,133 @@ func TestRunMaxIterationsIncludesPhaseAndDiagnostic(t *testing.T) {
 	lastSnap := s.Snapshots[len(s.Snapshots)-1]
 	if lastSnap.Error == nil || lastSnap.Error.Kind != stream.ErrMaxIterations {
 		t.Error("expected last snapshot to be the MaxIterations error snapshot")
+	}
+}
+
+func TestRunFallbackOnServerError_Implement(t *testing.T) {
+	// Primary model returns a 500-like error; fallback model should succeed.
+	s := newTestStream()
+	s.SetFallback(stream.FallbackConfig{Enabled: true, Model: "fallback-model"})
+	rt := &mockRuntime{
+		results: []mockResult{
+			{err: errors.New("internal server error: 500")}, // primary implement fails
+			{resp: &runtime.Response{Text: "fallback impl"}}, // fallback implement succeeds
+			{resp: &runtime.Response{Text: "review ok"}},     // review step
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1"), nil, nil}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
+
+	if s.GetStatus() != stream.StatusPaused {
+		t.Errorf("expected StatusPaused, got %s", s.GetStatus())
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if s.LastError != nil {
+		t.Errorf("expected no error, got %v", s.LastError)
+	}
+	// Should have made 3 calls: primary impl (fail), fallback impl (ok), review.
+	if rt.calls != 3 {
+		t.Errorf("expected 3 runtime calls, got %d", rt.calls)
+	}
+	// The second call should use the fallback model.
+	if rt.requests[1].Options["model"] != "fallback-model" {
+		t.Errorf("expected fallback model on call 2, got %q", rt.requests[1].Options["model"])
+	}
+	// Snapshot should record UsedFallback=true.
+	if !s.Snapshots[0].UsedFallback {
+		t.Error("expected UsedFallback=true in snapshot")
+	}
+	// Output should contain the fallback message.
+	if !strings.Contains(strings.Join(s.GetOutputLines(), "\n"), "server error") {
+		t.Errorf("expected 'server error' in output, got %v", s.GetOutputLines())
+	}
+}
+
+func TestRunFallbackOnRateLimit_Implement(t *testing.T) {
+	// Existing rate-limit path still works with new isFallbackEligible helper.
+	s := newTestStream()
+	s.SetFallback(stream.FallbackConfig{Enabled: true, Model: "fallback-model"})
+	rt := &mockRuntime{
+		results: []mockResult{
+			{err: errors.New("rate limit exceeded: 429")},
+			{resp: &runtime.Response{Text: "fallback impl"}},
+			{resp: &runtime.Response{Text: "review ok"}},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1"), nil, nil}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
+
+	if s.LastError != nil {
+		t.Errorf("expected no error, got %v", s.LastError)
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if rt.requests[1].Options["model"] != "fallback-model" {
+		t.Errorf("expected fallback model on call 2, got %q", rt.requests[1].Options["model"])
+	}
+	// Output should contain "rate limit" message.
+	if !strings.Contains(strings.Join(s.GetOutputLines(), "\n"), "rate limit") {
+		t.Errorf("expected 'rate limit' in output, got %v", s.GetOutputLines())
+	}
+}
+
+func TestRunRuntimeErrorDoesNotFallback(t *testing.T) {
+	// A generic runtime error (CLI crash) must NOT trigger fallback.
+	s := newTestStream()
+	s.SetFallback(stream.FallbackConfig{Enabled: true, Model: "fallback-model"})
+	rt := &mockRuntime{
+		results: []mockResult{
+			{err: errors.New("connection refused")},
+		},
+	}
+	beads := &mockBeads{openIDs: [][]string{ids("b-1")}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
+
+	if s.LastError == nil {
+		t.Fatal("expected LastError to be set")
+	}
+	if s.LastError.Kind != stream.ErrRuntime {
+		t.Errorf("expected ErrRuntime, got %s", s.LastError.Kind)
+	}
+	// Only one runtime call — no fallback attempted.
+	if rt.calls != 1 {
+		t.Errorf("expected 1 runtime call (no fallback), got %d", rt.calls)
+	}
+}
+
+func TestRunFallbackOnServerError_Review(t *testing.T) {
+	// Primary model returns 503 during review; fallback model should succeed.
+	s := newTestStream()
+	s.SetFallback(stream.FallbackConfig{Enabled: true, Model: "fallback-model"})
+	rt := &mockRuntime{
+		results: []mockResult{
+			{resp: &runtime.Response{Text: "impl ok"}},              // implement succeeds
+			{err: errors.New("service unavailable: 503")},           // primary review fails
+			{resp: &runtime.Response{Text: "fallback review ok"}},   // fallback review succeeds
+		},
+	}
+	// idsBefore=[b-1], idsAfterImpl=[], idsAfterReview=[] → converges
+	beads := &mockBeads{openIDs: [][]string{ids("b-1"), nil, nil}}
+
+	Run(context.Background(), s, &mockPhase{}, rt, beads, &mockGit{}, 0, mockFactory, nil, convergence.Config{})
+
+	if s.LastError != nil {
+		t.Errorf("expected no error, got %v", s.LastError)
+	}
+	if !s.Converged {
+		t.Error("expected Converged=true")
+	}
+	if rt.calls != 3 {
+		t.Errorf("expected 3 runtime calls, got %d", rt.calls)
+	}
+	// The third call (review fallback) should use fallback model.
+	if rt.requests[2].Options["model"] != "fallback-model" {
+		t.Errorf("expected fallback model on call 3, got %q", rt.requests[2].Options["model"])
 	}
 }
