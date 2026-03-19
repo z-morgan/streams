@@ -578,7 +578,7 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.newStreamTitle.Focus()
 		m.newStreamInput.Reset()
 		m.autoSizeNewStreamInput()
-		m.newStreamTemplates = stream.BuiltinTemplates()
+		m.newStreamTemplates = m.orch.Templates()
 		m.newStreamTemplateCur = 0
 		m.newStreamTemplate = ""
 		m.newStreamChecked = make(map[string]bool)

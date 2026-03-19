@@ -106,6 +106,15 @@ func run() int {
 		}
 	}
 
+	var configTemplates []stream.Template
+	for _, tc := range cfg.Templates {
+		configTemplates = append(configTemplates, stream.Template{
+			Name:        tc.Name,
+			Description: tc.Description,
+			Phases:      stream.ParsePhaseTree(tc.Phases),
+		})
+	}
+
 	envCfg, err := environment.LoadConfig(workDir)
 	if err != nil {
 		slog.Warn("failed to load environment config, environments disabled", "err", err)
@@ -119,12 +128,13 @@ func run() int {
 
 	s := &store.Store{Root: storeRoot}
 	orch := orchestrator.New(s, orchestrator.Config{
-		MaxIterations: maxIterations,
-		MaxBudgetUSD:  budgetUSD,
-		RepoDir:       workDir,
-		Pipeline:      pipelinePhases,
-		PolishSlots:   polishSlots,
-		Convergence:   cfg.Convergence,
+		MaxIterations:   maxIterations,
+		MaxBudgetUSD:    budgetUSD,
+		RepoDir:         workDir,
+		Pipeline:        pipelinePhases,
+		PolishSlots:     polishSlots,
+		Convergence:     cfg.Convergence,
+		ConfigTemplates: configTemplates,
 	}, envManager, mcpCfg)
 
 	if err := orch.LoadExisting(); err != nil {
