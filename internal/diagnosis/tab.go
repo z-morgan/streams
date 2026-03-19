@@ -53,7 +53,7 @@ func LaunchInTab(s *stream.Stream, storeRoot, workDir string) error {
 	}
 	switch os.Getenv("TERM_PROGRAM") {
 	case "ghostty":
-		return launchGhosttyWindow(scriptFile.Name())
+		return launchGhosttyTab(scriptFile.Name())
 	case "iTerm.app":
 		return launchITermTab(scriptFile.Name())
 	default:
@@ -73,8 +73,18 @@ func launchTmuxWindow(script, title string) error {
 	return exec.Command("tmux", args...).Run()
 }
 
-func launchGhosttyWindow(script string) error {
-	return exec.Command("open", "-na", "Ghostty.app", "--args", "-e", script).Run()
+func launchGhosttyTab(script string) error {
+	apple := fmt.Sprintf(`tell application "Ghostty" to activate
+delay 0.2
+tell application "System Events" to tell process "Ghostty"
+	keystroke "t" using command down
+end tell
+delay 0.5
+tell application "System Events" to tell process "Ghostty"
+	keystroke %q
+	keystroke return
+end tell`, script)
+	return exec.Command("osascript", "-e", apple).Run()
 }
 
 func launchITermTab(script string) error {
@@ -90,9 +100,14 @@ end tell`, script)
 }
 
 func launchTerminalTab(script string) error {
-	apple := fmt.Sprintf(`tell application "Terminal"
-	activate
-	do script %q
+	apple := fmt.Sprintf(`tell application "Terminal" to activate
+delay 0.2
+tell application "System Events" to tell process "Terminal"
+	keystroke "t" using command down
+end tell
+delay 0.5
+tell application "Terminal"
+	do script %q in front window
 end tell`, script)
 	return exec.Command("osascript", "-e", apple).Run()
 }
