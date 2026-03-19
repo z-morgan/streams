@@ -21,20 +21,20 @@ type Snapshot struct {
 	ReviseFeedback   string            // user's feedback prompt when requesting the revision
 	AutosquashErr    string            // non-empty if autosquash failed but loop continued
 	GuidanceConsumed []Guidance
-	UsedFallback     bool              // true if rate limit fallback was used this iteration
-	FallbackModel    string            // model name used for fallback (empty if no fallback)
+	UsedFallback     bool                 // true if rate limit fallback was used this iteration
+	FallbackModel    string               // model name used for fallback (empty if no fallback)
 	Convergence      *SnapshotConvergence `json:",omitempty"` // convergence state at this iteration
-	Error            *LoopError        // non-nil if iteration ended in error (partial snapshot)
+	Error            *LoopError           // non-nil if iteration ended in error (partial snapshot)
 	Timestamp        time.Time
 }
 
 // SnapshotConvergence captures convergence state for observability.
 type SnapshotConvergence struct {
-	Mode               string                       `json:"mode"`
-	RefinementCapReached bool                        `json:"refinement_cap_reached"`
-	Sections           map[string]SnapshotSection    `json:"sections,omitempty"`
-	BlockingIssues     []string                      `json:"blocking_issues,omitempty"`
-	AdvisoryIssues     []string                      `json:"advisory_issues,omitempty"`
+	Mode                 string                     `json:"mode"`
+	RefinementCapReached bool                       `json:"refinement_cap_reached"`
+	Sections             map[string]SnapshotSection `json:"sections,omitempty"`
+	BlockingIssues       []string                   `json:"blocking_issues,omitempty"`
+	AdvisoryIssues       []string                   `json:"advisory_issues,omitempty"`
 }
 
 // SnapshotSection captures per-section state at a point in time.
