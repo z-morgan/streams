@@ -1,0 +1,34 @@
+You are fixing issues identified during review of previous coding steps.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+## The Plan
+{{.PlanContent}}
+
+## Progress
+{{.AllStepsFormatted}}
+
+## Issues to Fix
+{{.ReviewBeadsList}}
+
+For each issue:
+1. Read the issue description to understand what needs to change.
+2. Make the fix with a fixup commit targeting the relevant SHA:
+   git commit --fixup=<sha>
+3. Run relevant tests.
+4. Close the issue: bd close <issue-id>
+
+After creating a fixup commit, check whether your changes affect code that
+later commits also touch:
+1. Run git log --oneline <target-sha>..HEAD to list downstream commits.
+2. If your fixup renamed an identifier, changed a function signature,
+   modified an interface, or altered a type that later commits reference,
+   create additional fixup commits for each affected downstream commit.
+3. Each additional fixup must target the correct downstream SHA:
+   git commit --fixup=<downstream-sha>
+
+Rules:
+- Fix all listed issues. Do not implement new steps.
+- Do not create new beads issues.
+- Skip any issues labeled "advisory".

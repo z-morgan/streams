@@ -30,6 +30,14 @@ type PromptData struct {
 	BaseSHA string // stream's rebase target, used by polish templates for git commands
 	Commits string // pre-formatted per-commit sections for commit-scoped slots
 
+	// Step-coding phase fields.
+	PlanContent       string // full plan.md content
+	AllStepsFormatted string // "[done] Step 1 — Title\n[current] Step 2 — Title\n..."
+	CurrentStep       string // title of current step (step mode)
+	CurrentStepID     string // bead ID of current step
+	IsFixMode         bool
+	ReviewBeadsList   string // formatted list of open review beads
+
 	// OverrideDirs are checked in order before the global user prompts dir.
 	// Typically: [per-stream dir, project dir].
 	OverrideDirs []string

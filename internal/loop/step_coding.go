@@ -6,39 +6,44 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
-
-	"github.com/zmorgan/streams/internal/runtime"
 )
 
-func (p *CodingPhase) ImplementPrompt(ctx PhaseContext) (string, error) {
-	return LoadPrompt("coding", "implement", promptDataFromContext(ctx))
+// StepCodingPhase implements MacroPhase for step-per-iteration coding.
+// Each iteration either implements the next unclosed step bead (step mode)
+// or addresses open review issues (fix mode).
+type StepCodingPhase struct{}
+
+func (p *StepCodingPhase) Name() string { return "step-coding" }
+
+func (p *StepCodingPhase) ImplementPrompt(ctx PhaseContext) (string, error) {
+	data := promptDataFromContext(ctx)
+
+	if data.IsFixMode {
+		return LoadPrompt("step-coding", "implement-fix", data)
+	}
+	return LoadPrompt("step-coding", "implement-step", data)
 }
 
-func (p *CodingPhase) ReviewPrompt(ctx PhaseContext) (string, error) {
-	return LoadPrompt("coding", "review", promptDataFromContext(ctx))
+func (p *StepCodingPhase) ReviewPrompt(ctx PhaseContext) (string, error) {
+	return LoadPrompt("step-coding", "review", promptDataFromContext(ctx))
 }
 
-// CodingPhase implements MacroPhase for the coding iteration cycle.
-type CodingPhase struct{}
-
-func (p *CodingPhase) Name() string { return "coding" }
-
-func (p *CodingPhase) ImplementTools() []string {
+func (p *StepCodingPhase) ImplementTools() []string {
 	return []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep"}
 }
 
-func (p *CodingPhase) ReviewTools() []string {
+func (p *StepCodingPhase) ReviewTools() []string {
 	return []string{"Bash", "Read", "Glob", "Grep"}
 }
 
-func (p *CodingPhase) IsConverged(result IterationResult) bool {
-	return result.OpenAfterReview <= result.OpenBeforeReview
+// IsConverged returns true when all step beads are closed and no review
+// issues remain (OpenAfterReview == 0).
+func (p *StepCodingPhase) IsConverged(result IterationResult) bool {
+	return result.OpenAfterReview == 0
 }
 
-// BeforeReview runs git rebase --autosquash to collapse fixup commits
-// so the review step sees clean history.
-func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
-	// Get current HEAD to compare with BaseSHA.
+// BeforeReview runs autosquash with agent-based conflict resolution.
+func (p *StepCodingPhase) BeforeReview(ctx PhaseContext) error {
 	headCmd := exec.Command("git", "rev-parse", "HEAD")
 	headCmd.Dir = ctx.WorkDir
 	headOut, err := headCmd.Output()
@@ -47,12 +52,10 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	}
 	headSHA := strings.TrimSpace(string(headOut))
 
-	// If no commits were made since BaseSHA, there's nothing to squash.
 	if headSHA == ctx.Stream.BaseSHA {
 		return nil
 	}
 
-	// Check for uncommitted changes that would block the rebase.
 	statusCmd := exec.Command("git", "status", "--porcelain")
 	statusCmd.Dir = ctx.WorkDir
 	statusOut, err := statusCmd.Output()
@@ -61,7 +64,6 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	}
 	dirty := len(strings.TrimSpace(string(statusOut))) > 0
 
-	// Stash uncommitted changes before rebasing.
 	if dirty {
 		stash := exec.Command("git", "stash", "--include-untracked")
 		stash.Dir = ctx.WorkDir
@@ -76,9 +78,6 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	if err != nil {
 		rebaseOutput := string(out)
 
-		// A fixup! commit that fully reverts its target produces an empty-commit
-		// error, not a merge conflict. The rebase agent can't handle this and
-		// will destructively drop all commits. Abort early instead.
 		if strings.Contains(rebaseOutput, "would make it empty") ||
 			strings.Contains(rebaseOutput, "would make\nit empty") {
 			abort := exec.Command("git", "rebase", "--abort")
@@ -94,12 +93,9 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 
 		slog.Info("autosquash failed, attempting agent resolution", "stream", ctx.Stream.ID)
 
-		// Try agent-based conflict resolution before aborting.
 		agentErr := runRebaseAgent(context.Background(), ctx, rebaseOutput, p.ImplementTools())
 		if agentErr == nil {
-			// Agent resolved conflicts — check that rebase actually completed.
 			if !isRebaseInProgress(ctx.WorkDir) {
-				// Verify the agent didn't drop all commits (HEAD should be ahead of baseSHA).
 				postHead := exec.Command("git", "rev-parse", "HEAD")
 				postHead.Dir = ctx.WorkDir
 				postOut, postErr := postHead.Output()
@@ -121,7 +117,6 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 
 		slog.Warn("rebase agent failed, aborting", "stream", ctx.Stream.ID, "err", agentErr)
 
-		// Fall back: abort and restore.
 		abort := exec.Command("git", "rebase", "--abort")
 		abort.Dir = ctx.WorkDir
 		_ = abort.Run()
@@ -134,7 +129,6 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 		return fmt.Errorf("autosquash rebase failed (agent could not resolve): %s", rebaseOutput)
 	}
 
-	// Restore stashed changes after successful rebase.
 	if dirty {
 		pop := exec.Command("git", "stash", "pop")
 		pop.Dir = ctx.WorkDir
@@ -146,43 +140,8 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 	return nil
 }
 
-// runRebaseAgent invokes a Claude agent to resolve autosquash rebase conflicts.
-// This is a package-level function so both CodingPhase and StepCodingPhase can use it.
-func runRebaseAgent(ctx context.Context, pctx PhaseContext, rebaseOutput string, tools []string) error {
-	data := promptDataFromContext(pctx)
-	data.RebaseOutput = rebaseOutput
-
-	prompt, err := LoadPrompt("coding", "rebase", data)
-	if err != nil {
-		return fmt.Errorf("failed to load rebase prompt: %w", err)
-	}
-
-	rt := &runtime.BudgetRuntime{Inner: pctx.Runtime, MaxBudget: "0.50"}
-
-	req := buildRequest(prompt, tools, pctx.Stream.GetEnvironmentPort(), "", "", nil)
-	req.OnOutput = func(line string) { pctx.Stream.AppendOutput(line) }
-
-	_, err = rt.Run(ctx, req)
-	return err
-}
-
-// isRebaseInProgress checks whether a git rebase is still in progress.
-func isRebaseInProgress(workDir string) bool {
-	cmd := exec.Command("git", "rev-parse", "--git-path", "rebase-merge")
-	cmd.Dir = workDir
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	// git rev-parse --git-path returns the path; check if the directory exists.
-	path := strings.TrimSpace(string(out))
-	check := exec.Command("test", "-d", path)
-	check.Dir = workDir
-	return check.Run() == nil
-}
-
-func (p *CodingPhase) TransitionMode() Transition {
+func (p *StepCodingPhase) TransitionMode() Transition {
 	return TransitionAutoAdvance
 }
 
-func (p *CodingPhase) ArtifactFile() string { return "" }
+func (p *StepCodingPhase) ArtifactFile() string { return "" }

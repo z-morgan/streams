@@ -22,6 +22,13 @@ import (
 	"github.com/zmorgan/streams/internal/convergence"
 )
 
+// TemplateConfig defines a stream template from config files.
+type TemplateConfig struct {
+	Name        string
+	Description string
+	Phases      string // compact spec: "research,plan>decompose,coding,review,polish"
+}
+
 // Config holds all persistent settings. Zero values mean "not set" so that
 // merging can distinguish between "absent" and "explicitly set to the zero
 // value" (e.g. max-budget-per-step = "" to disable budget).
@@ -30,6 +37,7 @@ type Config struct {
 	MaxIterations    *int    // nil = not set
 	Pipeline         *string // nil = not set
 	PolishSlots      *string // nil = use built-in defaults; comma-separated slot names
+	Templates        []TemplateConfig
 	Convergence      convergence.Config
 }
 
@@ -96,6 +104,9 @@ func merge(layers ...Config) Config {
 		if layer.PolishSlots != nil {
 			result.PolishSlots = layer.PolishSlots
 		}
+		if len(layer.Templates) > 0 {
+			result.Templates = append(result.Templates, layer.Templates...)
+		}
 		result.Convergence = convergence.Merge(result.Convergence, layer.Convergence)
 	}
 	return result
@@ -149,24 +160,54 @@ func LoadFile(path string) Config {
 //   - blank lines
 //   - quoted and unquoted values
 //   - kebab-case keys matching CLI flag names
+//   - [[template]] array-of-tables sections
 func parse(r *os.File) Config {
 	cfg := Config{}
 	scanner := bufio.NewScanner(r)
-	section := "" // current TOML table, e.g. "convergence"
+	section := ""                       // current TOML table, e.g. "convergence"
+	var currentTemplate *TemplateConfig // non-nil when inside a [[template]] block
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		// Handle TOML table headers like [convergence].
+		// Handle TOML table headers like [convergence] and [[template]].
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.TrimSpace(line[1 : len(line)-1])
+			// Flush pending template.
+			if currentTemplate != nil {
+				cfg.Templates = append(cfg.Templates, *currentTemplate)
+				currentTemplate = nil
+			}
+			inner := strings.TrimSpace(line[1 : len(line)-1])
+			if strings.HasPrefix(inner, "[") && strings.HasSuffix(inner, "]") {
+				// Array-of-tables: [[template]]
+				arrayName := strings.TrimSpace(inner[1 : len(inner)-1])
+				if arrayName == "template" {
+					currentTemplate = &TemplateConfig{}
+					section = ""
+				}
+			} else {
+				section = inner
+			}
 			continue
 		}
 
 		key, value, ok := parseLine(line)
 		if !ok {
+			continue
+		}
+
+		// Inside a [[template]] block.
+		if currentTemplate != nil {
+			switch key {
+			case "name":
+				currentTemplate.Name = value
+			case "description":
+				currentTemplate.Description = value
+			case "phases":
+				currentTemplate.Phases = value
+			}
 			continue
 		}
 
@@ -201,6 +242,10 @@ func parse(r *os.File) Config {
 			sd := convergence.ParseSectionDetection(value)
 			cfg.Convergence.SectionDetection = &sd
 		}
+	}
+	// Flush last template if file ends inside a [[template]] block.
+	if currentTemplate != nil {
+		cfg.Templates = append(cfg.Templates, *currentTemplate)
 	}
 	return cfg
 }

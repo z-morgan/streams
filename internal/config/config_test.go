@@ -21,10 +21,10 @@ func TestDefaults(t *testing.T) {
 
 func TestParseLine(t *testing.T) {
 	tests := []struct {
-		line    string
-		key     string
-		value   string
-		wantOK  bool
+		line   string
+		key    string
+		value  string
+		wantOK bool
 	}{
 		{`max-budget-per-step = "5.00"`, "max-budget-per-step", "5.00", true},
 		{`max-iterations = 10`, "max-iterations", "10", true},
@@ -323,6 +323,85 @@ func containsSubstr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestParseTemplates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(`
+max-iterations = 5
+
+[[template]]
+name = "Minimal"
+description = "Just coding"
+phases = "coding,review"
+
+[[template]]
+name = "Full"
+description = "Everything"
+phases = "research,plan>decompose,coding,review,polish"
+`), 0o644)
+
+	cfg := LoadFile(path)
+	if cfg.MaxIterations == nil || *cfg.MaxIterations != 5 {
+		t.Errorf("expected max-iterations 5, got %v", cfg.MaxIterations)
+	}
+	if len(cfg.Templates) != 2 {
+		t.Fatalf("expected 2 templates, got %d", len(cfg.Templates))
+	}
+	if cfg.Templates[0].Name != "Minimal" {
+		t.Errorf("expected first template Minimal, got %q", cfg.Templates[0].Name)
+	}
+	if cfg.Templates[0].Phases != "coding,review" {
+		t.Errorf("expected phases 'coding,review', got %q", cfg.Templates[0].Phases)
+	}
+	if cfg.Templates[1].Name != "Full" {
+		t.Errorf("expected second template Full, got %q", cfg.Templates[1].Name)
+	}
+	if cfg.Templates[1].Description != "Everything" {
+		t.Errorf("expected description 'Everything', got %q", cfg.Templates[1].Description)
+	}
+}
+
+func TestParseTemplatesWithOtherSections(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(`
+[[template]]
+name = "Quick"
+description = "Fast path"
+phases = "coding"
+
+[convergence]
+mode = "adaptive"
+`), 0o644)
+
+	cfg := LoadFile(path)
+	if len(cfg.Templates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(cfg.Templates))
+	}
+	if cfg.Templates[0].Name != "Quick" {
+		t.Errorf("expected template Quick, got %q", cfg.Templates[0].Name)
+	}
+	if cfg.Convergence.Mode == nil {
+		t.Fatal("expected convergence mode to be set")
+	}
+}
+
+func TestMergeTemplates(t *testing.T) {
+	t1 := TemplateConfig{Name: "A", Description: "first", Phases: "coding"}
+	t2 := TemplateConfig{Name: "B", Description: "second", Phases: "review"}
+
+	base := Config{Templates: []TemplateConfig{t1}}
+	overlay := Config{Templates: []TemplateConfig{t2}}
+	result := Merge(base, overlay)
+
+	if len(result.Templates) != 2 {
+		t.Fatalf("expected 2 templates after merge, got %d", len(result.Templates))
+	}
+	if result.Templates[0].Name != "A" || result.Templates[1].Name != "B" {
+		t.Errorf("expected [A, B], got [%s, %s]", result.Templates[0].Name, result.Templates[1].Name)
+	}
 }
 
 func strPtr(s string) *string { return &s }

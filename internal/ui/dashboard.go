@@ -500,6 +500,10 @@ func detailTopBar(st *stream.Stream, width int) string {
 	iter := fmt.Sprintf("iter %d", st.GetIteration())
 	suffix := phase + " · " + iter
 
+	if tmpl := st.GetTemplate(); tmpl != "" {
+		suffix += " · " + tmpl
+	}
+
 	// Add convergence summary if section tracker has data.
 	if tracker := st.GetSectionTracker(); tracker != nil && len(tracker.Sections) > 0 {
 		frozen := tracker.FrozenSections()

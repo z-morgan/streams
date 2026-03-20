@@ -238,6 +238,29 @@ func TestSelectedPipeline(t *testing.T) {
 	}
 }
 
+func TestSelectedPipelineAlternateTree(t *testing.T) {
+	// Verify selectedPipeline works correctly with a template tree that differs
+	// from the Classic tree (no nested phases).
+	minimalTree := []stream.PhaseNode{
+		{Name: "coding"},
+		{Name: "review"},
+	}
+	checked := map[string]bool{"coding": true, "review": true}
+	got := selectedPipeline(checked, minimalTree)
+	result := strings.Join(got, ",")
+	if result != "coding,review" {
+		t.Errorf("selectedPipeline with minimal tree = %q, want coding,review", result)
+	}
+
+	// Only one phase selected.
+	checked = map[string]bool{"coding": true}
+	got = selectedPipeline(checked, minimalTree)
+	result = strings.Join(got, ",")
+	if result != "coding" {
+		t.Errorf("selectedPipeline with minimal tree (coding only) = %q, want coding", result)
+	}
+}
+
 func TestDefaultPhaseChecks(t *testing.T) {
 	checked := defaultPhaseChecks([]string{"plan", "coding"})
 	if !checked["plan"] || !checked["coding"] {

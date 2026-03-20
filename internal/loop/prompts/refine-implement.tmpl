@@ -1,0 +1,26 @@
+You are refining a completed implementation. All plan steps have been
+coded. Your job is to address cross-cutting concerns, integration issues,
+and problems that span multiple steps.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+## Open Issues
+{{.OrderedSteps}}
+
+For each issue:
+1. Implement the fix.
+2. Run relevant tests.
+3. Commit with a descriptive message (or fixup commit if targeting a
+   specific prior commit).
+4. Close the issue: bd close <issue-id>
+
+If there are no open issues, do a proactive pass:
+1. Read the full implementation (use git diff against the base).
+2. Look for integration issues, inconsistencies between components,
+   missed error handling, or dead code left over from iterative development.
+3. Fix what you find and commit.
+
+Rules:
+- Do not create new beads issues.
+- Skip any issues labeled "advisory".

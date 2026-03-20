@@ -46,13 +46,13 @@ type iterationRow struct {
 	IsBreakpoint       bool
 	HasError           bool
 	IsInitialPrompt    bool
-	IsRevision         bool            // first iteration after a revision
-	IsPendingRevise    bool            // informational row: a revise is queued
-	PendingRevisePhase string          // target phase name for the pending revise
+	IsRevision         bool              // first iteration after a revision
+	IsPendingRevise    bool              // informational row: a revise is queued
+	PendingRevisePhase string            // target phase name for the pending revise
 	IsGuidance         bool              // guidance injection indicator row
 	GuidanceItems      []stream.Guidance // guidance items (only set when IsGuidance)
-	Step               stream.IterStep // current step (only meaningful for in-progress rows)
-	SnapshotIndex      int             // -1 for non-snapshot rows
+	Step               stream.IterStep   // current step (only meaningful for in-progress rows)
+	SnapshotIndex      int               // -1 for non-snapshot rows
 }
 
 func buildIterationList(st *stream.Stream) []iterationRow {
@@ -304,11 +304,12 @@ func detailStatusMarker(st *stream.Stream) string {
 	status := st.GetStatus()
 	name := status.String()
 	modelTag := detailModelTag(st)
+	templateTag := detailTemplateTag(st)
 
 	if status == stream.StatusCompleted {
 		marker := lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("[Completed]")
 		marker += "  " + helpStyle.Render("branch: "+st.Branch)
-		marker += modelTag
+		marker += modelTag + templateTag
 		return marker
 	}
 
@@ -317,7 +318,7 @@ func detailStatusMarker(st *stream.Stream) string {
 		if st.WorkTree != "" {
 			marker += "  " + helpStyle.Render("worktree: "+st.Branch)
 		}
-		marker += modelTag
+		marker += modelTag + templateTag
 		return marker
 	}
 
@@ -345,8 +346,17 @@ func detailStatusMarker(st *stream.Stream) string {
 		marker += "  " + lipgloss.NewStyle().Foreground(colorSuccess).Render(fmt.Sprintf("server: :%d", port))
 	}
 
-	marker += modelTag
+	marker += modelTag + templateTag
 	return marker
+}
+
+// detailTemplateTag returns the "template: <name>" fragment for the status header.
+func detailTemplateTag(st *stream.Stream) string {
+	tmpl := st.GetTemplate()
+	if tmpl == "" {
+		return ""
+	}
+	return "  " + helpStyle.Render("template: "+tmpl)
 }
 
 // detailModelTag returns the "model: <name>" fragment for the status header.

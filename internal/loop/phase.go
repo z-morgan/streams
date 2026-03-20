@@ -2,6 +2,7 @@ package loop
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/zmorgan/streams/internal/convergence"
 	"github.com/zmorgan/streams/internal/runtime"
@@ -34,11 +35,14 @@ type PhaseContext struct {
 	Runtime            runtime.Runtime
 	WorkDir            string
 	Iteration          int
-	OrderedSteps       string   // formatted step list injected into implement prompt
-	PromptOverrideDirs []string // per-stream and project prompt override directories
-	MCPConfigPath      string   // absolute path to mcp.json (empty = no MCP)
-	MCPToolPatterns    []string // e.g. ["mcp__chrome-devtools__*"]
+	OrderedSteps       string           // formatted step list injected into implement prompt
+	PromptOverrideDirs []string         // per-stream and project prompt override directories
+	MCPConfigPath      string           // absolute path to mcp.json (empty = no MCP)
+	MCPToolPatterns    []string         // e.g. ["mcp__chrome-devtools__*"]
 	ConvergenceConfig  *convergence.ResolvedConfig // nil = use legacy convergence
+	PlanContent        string           // contents of plan.md (empty if no plan phase)
+	StepBeads          []StepWithStatus // all step-labeled children with status
+	OpenReviewBeads    []string         // IDs of open non-step children
 }
 
 // IterationResult captures the outcome of a single iteration for convergence detection.
@@ -65,13 +69,46 @@ type MacroPhase interface {
 }
 
 func promptDataFromContext(ctx PhaseContext) PromptData {
-	return PromptData{
-		Task:         ctx.Stream.Task,
-		ParentID:     ctx.Stream.BeadsParentID,
-		Iteration:    ctx.Iteration,
-		OrderedSteps: ctx.OrderedSteps,
-		OverrideDirs: ctx.PromptOverrideDirs,
+	// Determine step-coding mode and current step.
+	isFixMode := len(ctx.OpenReviewBeads) > 0
+	var currentStep string
+	var currentStepID string
+	currentIdx := -1
+	if !isFixMode {
+		for i, s := range ctx.StepBeads {
+			if s.Status != "closed" {
+				currentIdx = i
+				currentStep = s.Title
+				currentStepID = s.ID
+				break
+			}
+		}
 	}
+
+	return PromptData{
+		Task:              ctx.Stream.Task,
+		ParentID:          ctx.Stream.BeadsParentID,
+		Iteration:         ctx.Iteration,
+		OrderedSteps:      ctx.OrderedSteps,
+		PlanContent:       ctx.PlanContent,
+		AllStepsFormatted: FormatStepProgress(ctx.StepBeads, currentIdx),
+		CurrentStep:       currentStep,
+		CurrentStepID:     currentStepID,
+		IsFixMode:         isFixMode,
+		ReviewBeadsList:   formatReviewBeads(ctx.OpenReviewBeads),
+		OverrideDirs:      ctx.PromptOverrideDirs,
+	}
+}
+
+func formatReviewBeads(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "- %s\n", id)
+	}
+	return b.String()
 }
 
 // NewPhase returns a MacroPhase for the given pipeline phase name.
@@ -85,6 +122,10 @@ func NewPhase(name string) (MacroPhase, error) {
 		return &DecomposePhase{}, nil
 	case "coding":
 		return &CodingPhase{}, nil
+	case "step-coding":
+		return &StepCodingPhase{}, nil
+	case "refine":
+		return &RefinementPhase{}, nil
 	case "review":
 		return &ReviewPhase{}, nil
 	case "polish":

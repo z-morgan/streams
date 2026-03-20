@@ -50,12 +50,13 @@ const (
 
 // Config holds orchestrator-level settings.
 type Config struct {
-	MaxIterations int
-	MaxBudgetUSD  string
-	RepoDir       string             // the main repository directory
-	Pipeline      []string           // ordered macro-phase names; defaults to ["coding"]
-	PolishSlots   []string           // nil = use built-in defaults; explicit list replaces defaults
-	Convergence   convergence.Config // global convergence settings
+	MaxIterations   int
+	MaxBudgetUSD    string
+	RepoDir         string             // the main repository directory
+	Pipeline        []string           // ordered macro-phase names; defaults to ["coding"]
+	PolishSlots     []string           // nil = use built-in defaults; explicit list replaces defaults
+	Convergence     convergence.Config // global convergence settings
+	ConfigTemplates []stream.Template  // templates parsed from config files
 }
 
 // Orchestrator manages the lifecycle of multiple streams.
@@ -132,7 +133,7 @@ func (o *Orchestrator) InitBeads(stealth bool) error {
 
 // Create creates a new stream backed by a beads parent issue and git worktree.
 // If pipeline is nil/empty, the global config pipeline is used.
-func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int, notify stream.NotifySettings, models ...stream.ModelConfig) (*stream.Stream, error) {
+func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int, notify stream.NotifySettings, template string, models ...stream.ModelConfig) (*stream.Stream, error) {
 	repoDir := o.config.RepoDir
 
 	parentID, err := createBeadsParent(title, repoDir)
@@ -174,6 +175,7 @@ func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints
 		PipelineIndex: 0,
 		Breakpoints:   breakpoints,
 		Notify:        notify,
+		Template:      template,
 		BeadsParentID: parentID,
 		BaseSHA:       baseSHA,
 		Branch:        branch,
@@ -763,6 +765,11 @@ func (o *Orchestrator) checkDependents() {
 // DefaultPipeline returns the global default pipeline from config.
 func (o *Orchestrator) DefaultPipeline() []string {
 	return o.config.Pipeline
+}
+
+// Templates returns the merged list of built-in and config-defined templates.
+func (o *Orchestrator) Templates() []stream.Template {
+	return stream.MergeTemplates(stream.BuiltinTemplates(), o.config.ConfigTemplates)
 }
 
 // IsRunning returns whether a stream's loop goroutine is active.
