@@ -257,3 +257,22 @@ func FormatSteps(steps []Step) string {
 	}
 	return b.String()
 }
+
+// FormatStepProgress renders a progress list with [done]/[current]/[open] markers.
+// currentIdx is the index of the current step (-1 if no current step, e.g. fix mode).
+func FormatStepProgress(steps []StepWithStatus, currentIdx int) string {
+	var b strings.Builder
+	for i, s := range steps {
+		var marker string
+		switch {
+		case s.Status == "closed":
+			marker = "[done]"
+		case i == currentIdx:
+			marker = "[current]"
+		default:
+			marker = "[open]"
+		}
+		fmt.Fprintf(&b, "%s Step %d — %s (%s)\n", marker, s.Sequence, s.Title, s.ID)
+	}
+	return b.String()
+}
