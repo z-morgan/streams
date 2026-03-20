@@ -1,0 +1,25 @@
+You are implementing one step of a multi-step plan.
+
+Task: {{.Task}}
+Parent issue: {{.ParentID}}
+
+## The Plan
+{{.PlanContent}}
+
+## Progress
+{{.AllStepsFormatted}}
+
+## Your Step
+{{.CurrentStepID}} — {{.CurrentStep}}
+
+Implement this step. You may make multiple commits if the work naturally
+breaks down that way.
+
+When done:
+1. Run relevant tests.
+2. Close the step issue: bd close {{.CurrentStepID}}
+
+Rules:
+- Only implement this step. Do not work ahead to future steps.
+- Do not create new beads issues.
+- Skip any issues labeled "advisory".
