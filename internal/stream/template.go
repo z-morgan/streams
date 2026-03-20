@@ -32,6 +32,20 @@ func BuiltinTemplates() []Template {
 				{Name: "polish"},
 			},
 		},
+		{
+			Name:        "Incremental",
+			Description: "Step-by-step coding with inline review and refinement",
+			Phases: []PhaseNode{
+				{Name: "research"},
+				{Name: "plan", Children: []PhaseNode{
+					{Name: "decompose"},
+				}},
+				{Name: "step-coding"},
+				{Name: "refine"},
+				{Name: "review"},
+				{Name: "polish"},
+			},
+		},
 	}
 }
 
