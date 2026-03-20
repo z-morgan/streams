@@ -135,6 +135,23 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			return
 		}
 
+		// Fetch step beads and open review beads for step-coding phases.
+		stepBeads, err := beads.FetchStepBeads(s.BeadsParentID)
+		if err != nil {
+			slog.Warn("failed to fetch step beads", "stream", s.ID, "err", err)
+		}
+		openReviewBeads, err := beads.FetchOpenNonStepChildren(s.BeadsParentID)
+		if err != nil {
+			slog.Warn("failed to fetch open non-step children", "stream", s.ID, "err", err)
+		}
+
+		// Read plan.md if it exists in the work directory.
+		var planContent string
+		planPath := filepath.Join(s.WorkTree, "plan.md")
+		if data, err := os.ReadFile(planPath); err == nil {
+			planContent = string(data)
+		}
+
 		pctx := PhaseContext{
 			Stream:             s,
 			Runtime:            rt,
@@ -144,6 +161,9 @@ func Run(ctx context.Context, s *stream.Stream, phase MacroPhase, rt runtime.Run
 			PromptOverrideDirs: promptOverrideDirs,
 			MCPConfigPath:      mcpConfigPath,
 			MCPToolPatterns:    mcpToolPatterns,
+			PlanContent:        planContent,
+			StepBeads:          stepBeads,
+			OpenReviewBeads:    openReviewBeads,
 		}
 
 		// --- StepImplement ---

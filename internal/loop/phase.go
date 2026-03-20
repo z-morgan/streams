@@ -34,11 +34,14 @@ type PhaseContext struct {
 	Runtime            runtime.Runtime
 	WorkDir            string
 	Iteration          int
-	OrderedSteps       string   // formatted step list injected into implement prompt
-	PromptOverrideDirs []string // per-stream and project prompt override directories
-	MCPConfigPath      string   // absolute path to mcp.json (empty = no MCP)
-	MCPToolPatterns    []string // e.g. ["mcp__chrome-devtools__*"]
+	OrderedSteps       string           // formatted step list injected into implement prompt
+	PromptOverrideDirs []string         // per-stream and project prompt override directories
+	MCPConfigPath      string           // absolute path to mcp.json (empty = no MCP)
+	MCPToolPatterns    []string         // e.g. ["mcp__chrome-devtools__*"]
 	ConvergenceConfig  *convergence.ResolvedConfig // nil = use legacy convergence
+	PlanContent        string           // contents of plan.md (empty if no plan phase)
+	StepBeads          []StepWithStatus // all step-labeled children with status
+	OpenReviewBeads    []string         // IDs of open non-step children
 }
 
 // IterationResult captures the outcome of a single iteration for convergence detection.
