@@ -95,7 +95,7 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 		slog.Info("autosquash failed, attempting agent resolution", "stream", ctx.Stream.ID)
 
 		// Try agent-based conflict resolution before aborting.
-		agentErr := p.runRebaseAgent(context.Background(), ctx, rebaseOutput)
+		agentErr := runRebaseAgent(context.Background(), ctx, rebaseOutput, p.ImplementTools())
 		if agentErr == nil {
 			// Agent resolved conflicts — check that rebase actually completed.
 			if !isRebaseInProgress(ctx.WorkDir) {
@@ -147,7 +147,8 @@ func (p *CodingPhase) BeforeReview(ctx PhaseContext) error {
 }
 
 // runRebaseAgent invokes a Claude agent to resolve autosquash rebase conflicts.
-func (p *CodingPhase) runRebaseAgent(ctx context.Context, pctx PhaseContext, rebaseOutput string) error {
+// This is a package-level function so both CodingPhase and StepCodingPhase can use it.
+func runRebaseAgent(ctx context.Context, pctx PhaseContext, rebaseOutput string, tools []string) error {
 	data := promptDataFromContext(pctx)
 	data.RebaseOutput = rebaseOutput
 
@@ -158,7 +159,7 @@ func (p *CodingPhase) runRebaseAgent(ctx context.Context, pctx PhaseContext, reb
 
 	rt := &runtime.BudgetRuntime{Inner: pctx.Runtime, MaxBudget: "0.50"}
 
-	req := buildRequest(prompt, p.ImplementTools(), pctx.Stream.GetEnvironmentPort(), "", "", nil)
+	req := buildRequest(prompt, tools, pctx.Stream.GetEnvironmentPort(), "", "", nil)
 	req.OnOutput = func(line string) { pctx.Stream.AppendOutput(line) }
 
 	_, err = rt.Run(ctx, req)
