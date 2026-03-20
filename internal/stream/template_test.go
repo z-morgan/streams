@@ -42,6 +42,39 @@ func TestBuiltinTemplates(t *testing.T) {
 	}
 }
 
+func TestBuiltinTemplates_Incremental(t *testing.T) {
+	templates := BuiltinTemplates()
+
+	incr := FindTemplate("Incremental", templates)
+	if incr == nil {
+		t.Fatal("expected to find Incremental template")
+	}
+	if incr.Description == "" {
+		t.Error("expected non-empty description for Incremental template")
+	}
+
+	var names []string
+	for _, p := range incr.Phases {
+		names = append(names, p.Name)
+	}
+	want := []string{"research", "plan", "step-coding", "refine", "review", "polish"}
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("Incremental top-level phases = %v, want %v", names, want)
+	}
+
+	// Verify plan has decompose as a child.
+	var planNode PhaseNode
+	for _, p := range incr.Phases {
+		if p.Name == "plan" {
+			planNode = p
+			break
+		}
+	}
+	if len(planNode.Children) != 1 || planNode.Children[0].Name != "decompose" {
+		t.Errorf("expected plan to have [decompose] child, got %v", planNode.Children)
+	}
+}
+
 func TestFindTemplate(t *testing.T) {
 	templates := BuiltinTemplates()
 
