@@ -124,6 +124,8 @@ func NewPhase(name string) (MacroPhase, error) {
 		return &CodingPhase{}, nil
 	case "step-coding":
 		return &StepCodingPhase{}, nil
+	case "refine":
+		return &RefinementPhase{}, nil
 	case "review":
 		return &ReviewPhase{}, nil
 	case "polish":
