@@ -58,6 +58,14 @@ func (m *mockBeads) FetchAllChildTitles(_ string) (map[string]string, error) {
 	return nil, nil
 }
 
+func (m *mockBeads) FetchStepBeads(_ string) ([]StepWithStatus, error) {
+	return nil, nil
+}
+
+func (m *mockBeads) FetchOpenNonStepChildren(_ string) ([]string, error) {
+	return nil, nil
+}
+
 func (m *mockBeads) LabelIssue(_, _ string) error {
 	return nil
 }
