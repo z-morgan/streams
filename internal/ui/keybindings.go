@@ -47,6 +47,7 @@ type DetailCtx struct {
 	HasArtifact   bool
 	ShowArtifact  bool
 	ArtifactPhase string
+	HasEnvConfig  bool
 }
 
 // KeyBinding describes a single keyboard shortcut.
@@ -78,6 +79,13 @@ var Bindings = []KeyBinding{
 	{Key: "D", Action: "diagnose", Description: "Launch a diagnostic Claude session in a new terminal tab for the selected stream.", Scope: ScopeDashboard},
 	{Key: "g", Action: "guidance", Description: "Queue a guidance message for the selected stream. The message is delivered at the next iteration boundary.", Scope: ScopeDashboard},
 	{Key: "b", Action: "blockers", Description: "Set blocker dependencies for the selected stream. Blocked streams auto-start when all blockers stop running.", Scope: ScopeDashboard},
+	{Key: "C", Action: "multi-env setup", Description: "Launch an interactive Claude session to set up or reconfigure containerized stream environments.", Scope: ScopeDashboard,
+		ActionFunc: func(ctx *DetailCtx) string {
+			if ctx != nil && ctx.HasEnvConfig {
+				return "multi-env config"
+			}
+			return "multi-env setup"
+		}},
 	{Key: "v", Action: "channels", Description: "Switch to the channels view, which displays streams organized by channel in a grid.", Scope: ScopeDashboard},
 	{Key: "q", Action: "quit", Description: "Quit the application. Prompts for confirmation if streams are running.", Scope: ScopeDashboard},
 
@@ -92,6 +100,13 @@ var Bindings = []KeyBinding{
 	{Key: "D", Action: "diagnose", Description: "Launch a diagnostic Claude session in a new terminal tab for the selected stream.", Scope: ScopeDashboardChannels},
 	{Key: "g", Action: "guidance", Description: "Queue a guidance message for the selected stream. The message is delivered at the next iteration boundary.", Scope: ScopeDashboardChannels},
 	{Key: "b", Action: "blockers", Description: "Set blocker dependencies for the selected stream. Blocked streams auto-start when all blockers stop running.", Scope: ScopeDashboardChannels},
+	{Key: "C", Action: "multi-env setup", Description: "Launch an interactive Claude session to set up or reconfigure containerized stream environments.", Scope: ScopeDashboardChannels,
+		ActionFunc: func(ctx *DetailCtx) string {
+			if ctx != nil && ctx.HasEnvConfig {
+				return "multi-env config"
+			}
+			return "multi-env setup"
+		}},
 	{Key: "v", Action: "list", Description: "Switch back to the list view.", Scope: ScopeDashboardChannels},
 	{Key: "q", Action: "quit", Description: "Quit the application. Prompts for confirmation if streams are running.", Scope: ScopeDashboardChannels},
 
@@ -133,6 +148,13 @@ var Bindings = []KeyBinding{
 	{Key: "d", Action: "delete", Description: "Delete the stream permanently. Only available at the review step or after completion.", Scope: ScopeDetail,
 		ShowFunc: func(ctx *DetailCtx) bool {
 			return ctx.AtReview || ctx.Status == stream.StatusCompleted
+		}},
+	{Key: "C", Action: "multi-env setup", Description: "Launch an interactive Claude session to set up or reconfigure containerized stream environments.", Scope: ScopeDetail,
+		ActionFunc: func(ctx *DetailCtx) string {
+			if ctx != nil && ctx.HasEnvConfig {
+				return "multi-env config"
+			}
+			return "multi-env setup"
 		}},
 	{Key: "q/esc", Action: "back", Description: "Return to the dashboard.", Scope: ScopeDetail},
 	{Key: "f", Action: "toggle artifact", Description: "Toggle between the snapshot summary and the artifact file for the current phase. Only available when the snapshot has an artifact.", Scope: ScopeDetail, Condition: "snapshot has artifact",

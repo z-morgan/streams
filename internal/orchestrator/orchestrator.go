@@ -652,6 +652,18 @@ func (o *Orchestrator) Diagnose(id string) error {
 	return diagnosis.LaunchInTab(st, o.store.Root, o.config.RepoDir)
 }
 
+// LaunchEnvSetup opens a new terminal tab with an interactive Claude session
+// for configuring multi-environment support. This is a project-level operation.
+func (o *Orchestrator) LaunchEnvSetup() error {
+	return environment.LaunchSetupInTab(o.config.RepoDir)
+}
+
+// HasEnvConfig reports whether the project has an environment.json config file.
+func (o *Orchestrator) HasEnvConfig() bool {
+	_, err := environment.LoadConfig(o.config.RepoDir)
+	return err == nil
+}
+
 // SendGuidance queues a guidance message for a stream.
 func (o *Orchestrator) SendGuidance(id string, text string) error {
 	st := o.Get(id)

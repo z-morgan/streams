@@ -196,6 +196,9 @@ type Model struct {
 	attachedFromRunning bool // true if attach was triggered from a running stream
 	showRestartPrompt   bool // true after returning from an auto-paused attach
 
+	// Whether the project has .streams/environment.json.
+	hasEnvConfig bool
+
 	// Spinner animation state for in-progress iterations.
 	spinnerFrame int
 
@@ -275,6 +278,7 @@ func New(orch *orchestrator.Orchestrator) Model {
 	ni.SetHeight(3)
 	ni.MaxHeight = 0
 
+	envConfig := orch.HasEnvConfig()
 	return Model{
 		orch:           orch,
 		modelFetcher:   &models.Fetcher{},
@@ -282,6 +286,8 @@ func New(orch *orchestrator.Orchestrator) Model {
 		guidanceInput:  ti,
 		newStreamTitle: titleInput,
 		newStreamInput: ni,
+		hasEnvConfig:   envConfig,
+		detail:         detailView{hasEnvConfig: envConfig},
 	}
 }
 
@@ -663,6 +669,12 @@ func (m Model) updateDashboard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.setStatus("No stream selected.")
 
+	case "C":
+		if err := m.orch.LaunchEnvSetup(); err != nil {
+			return m.setStatus("Env setup error: " + err.Error())
+		}
+		return m.setStatus("Environment setup launched in new tab.")
+
 	case "v":
 		if m.dashboard.mode == modeChannels {
 			m.dashboard.mode = modeList
@@ -896,6 +908,12 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return claudeExitMsg{err: err}
 		})
+
+	case "C":
+		if err := m.orch.LaunchEnvSetup(); err != nil {
+			return m.setStatus("Env setup error: " + err.Error())
+		}
+		return m.setStatus("Environment setup launched in new tab.")
 
 	case "D":
 		if st == nil {

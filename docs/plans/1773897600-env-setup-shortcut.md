@@ -18,9 +18,9 @@ This is the "smart" version of environment setup — Claude inspects the actual 
 
 An overlay with static documentation would be quick to build but less useful — the user still has to write the files themselves. The Claude session approach lets the user ask questions, iterate on the config, and get a working setup without leaving the terminal. It follows the same pattern as the existing `D` (diagnose) shortcut.
 
-### Key choice: `e`
+### Key choice: `C`
 
-`e` is available on both Dashboard and Detail views. Mnemonic: **e**nvironment.
+`C` (uppercase) is available on both Dashboard and Detail views. Mnemonic: **C**onfigure.
 
 ### Conditional visibility
 

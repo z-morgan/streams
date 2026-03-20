@@ -23,6 +23,8 @@ type detailView struct {
 	beadFocused    bool   // true when bead-browse mode is active
 	beadCursor     int    // index into combined bead list (closed then opened)
 	beadShowOutput string // cached bd show output for the selected bead
+
+	hasEnvConfig bool // project has .streams/environment.json
 }
 
 func (d *detailView) clampCursor(count int) {
@@ -281,10 +283,11 @@ func detailHelpText(st *stream.Stream, dv detailView, rows []iterationRow, snaps
 
 func buildDetailCtx(st *stream.Stream, dv detailView, rows []iterationRow, snaps []stream.Snapshot) *DetailCtx {
 	ctx := &DetailCtx{
-		Status:     st.GetStatus(),
-		CanRevise:  st.GetPipelineIndex() > 0,
-		CanAdvance: canForceAdvance(st),
-		AtReview:   isPausedAtReview(st),
+		Status:       st.GetStatus(),
+		CanRevise:    st.GetPipelineIndex() > 0,
+		CanAdvance:   canForceAdvance(st),
+		AtReview:     isPausedAtReview(st),
+		HasEnvConfig: dv.hasEnvConfig,
 	}
 
 	cursor := dv.iterCursor
