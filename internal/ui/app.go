@@ -139,6 +139,7 @@ type Model struct {
 	newStreamTemplate         string                // selected template name
 	newStreamOverlayWidth     int                   // dynamic overlay width for task step
 	creating                  bool                  // true while orch.Create is running
+	newStreamError            string                // error from last creation attempt, shown inline in wizard
 
 	// Quit confirmation overlay state.
 	showQuitConfirm bool
@@ -436,7 +437,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case beadsInitDoneMsg:
 		if msg.err != nil {
 			m.creating = false
-			m = m.withError("Error initializing beads: " + msg.err.Error())
+			m.newStreamError = "Error initializing beads: " + msg.err.Error()
+			m.showNewStream = true
 			return m, nil
 		}
 		title := m.pendingTitle
@@ -455,9 +457,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamCreatedMsg:
 		m.creating = false
 		if msg.err != nil {
-			m = m.withError("Error creating stream: " + msg.err.Error())
+			m.newStreamError = msg.err.Error()
 			return m, nil
 		}
+		// Success: close the wizard and start the stream.
+		m.showNewStream = false
+		m.newStreamStep = 0
+		m.newStreamError = ""
 		if err := m.orch.Start(msg.stream.ID); err != nil {
 			m = m.withError("Stream created but failed to start: " + err.Error())
 		}
@@ -1132,6 +1138,14 @@ func (m Model) updateDetailBeadBrowse(msg tea.KeyPressMsg, st *stream.Stream, ro
 }
 
 func (m Model) updateNewStream(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Block input while an async create is in flight.
+	if m.creating {
+		return m, nil
+	}
+	// Clear any inline error when the user interacts with the wizard.
+	if _, ok := msg.(tea.KeyPressMsg); ok {
+		m.newStreamError = ""
+	}
 	if m.newStreamStep == 5 {
 		return m.updateNewStreamBreakpoints(msg)
 	}
@@ -1675,8 +1689,7 @@ func (m Model) createStream(pipeline []string, breakpoints []int, template strin
 	notify := m.newStreamNotify
 	modelConfig := m.newStreamModels
 	fallbackConfig := m.newStreamFallback
-	m.showNewStream = false
-	m.newStreamStep = 0
+	m.newStreamError = ""
 	if m.orch.NeedsBeadsInit() {
 		m.pendingTitle = title
 		m.pendingTask = task
@@ -2125,7 +2138,7 @@ func (m Model) viewString() string {
 	}
 
 	if m.showNewStream {
-		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamTemplates, m.newStreamTemplateCur, m.newStreamTemplate, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamShowFallback, m.newStreamFBCursor, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.width, m.height)
+		return renderNewStreamOverlay(m.newStreamTitle, m.newStreamInput, m.newStreamStep, m.newStreamTemplates, m.newStreamTemplateCur, m.newStreamTemplate, m.newStreamPhaseCur, m.newStreamChecked, m.newStreamModelCursor, m.newStreamModels, m.newStreamPerPhase, m.newStreamPhaseModelCursor, m.modelFetcher.Sections(), m.modelFetcher.OllamaRunning(), m.newStreamFallback, m.newStreamShowFallback, m.newStreamFBCursor, m.newStreamBreakpoints, m.newStreamBPCursor, m.newStreamNotify, m.newStreamOverlayWidth, m.creating, m.newStreamError, m.width, m.height)
 	}
 
 	if m.showConvergeConfirm {
@@ -2254,7 +2267,7 @@ func (m Model) viewString() string {
 	}
 }
 
-func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step int, templates []stream.Template, templateCursor int, selectedTemplate string, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, showFallback bool, fbCursor int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth, width, height int) string {
+func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step int, templates []stream.Template, templateCursor int, selectedTemplate string, phaseCursor int, checked map[string]bool, modelCursor int, modelConfig stream.ModelConfig, perPhase bool, phaseModelCursor int, modelSections []models.Section, ollamaRunning bool, fallback stream.FallbackConfig, showFallback bool, fbCursor int, breakpoints map[int]bool, bpCursor int, notify stream.NotifySettings, taskOverlayWidth int, creating bool, createError string, width, height int) string {
 	var overlay string
 
 	// Resolve template phases for steps that need pipeline info.
@@ -2381,6 +2394,14 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step int, temp
 		}
 		overlay += "\n" + renderNotifyToggles(notify) + "\n"
 		overlay += helpStyle.Render("j/k: navigate  space: toggle  enter: create  esc: back")
+	}
+
+	if creating {
+		overlay += "\n" + lipgloss.NewStyle().Foreground(colorPrimary).Render("Creating stream...")
+	}
+	if createError != "" {
+		overlay += "\n" + errorBarStyle.Render("Error: "+createError)
+		overlay += "\n" + helpStyle.Render("Press enter to retry")
 	}
 
 	ow := overlayWidth(width, 100)
