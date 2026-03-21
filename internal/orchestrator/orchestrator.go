@@ -163,6 +163,7 @@ func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints
 
 	baseSHA, err := gitHead(repoDir)
 	if err != nil {
+		cleanupBeadsParent(parentID, repoDir)
 		return nil, fmt.Errorf("git HEAD: %w", err)
 	}
 
@@ -171,6 +172,7 @@ func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints
 	worktreePath := repoDir + "/.streams/worktrees/" + streamID
 
 	if err := createWorktree(repoDir, worktreePath, branch); err != nil {
+		cleanupBeadsParent(parentID, repoDir)
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
@@ -974,6 +976,23 @@ func newUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// cleanupBeadsParent closes and deletes a beads issue on a best-effort basis.
+// Used to avoid orphaned issues when stream creation fails after the beads
+// parent was already created.
+func cleanupBeadsParent(id, workDir string) {
+	cmd := exec.Command("bd", "close", id, "--reason", "stream creation failed")
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("cleanup: bd close failed", "id", id, "err", err, "output", strings.TrimSpace(string(out)))
+	}
+
+	cmd = exec.Command("bd", "delete", id, "--force")
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("cleanup: bd delete failed", "id", id, "err", err, "output", strings.TrimSpace(string(out)))
+	}
 }
 
 func createWorktree(repoDir, worktreePath, branch string) error {
