@@ -14,7 +14,7 @@ func (r *ResearchPhase) ReviewPrompt(ctx PhaseContext) (string, error) {
 }
 
 func (r *ResearchPhase) ImplementTools() []string {
-	return []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep"}
+	return []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebSearch"}
 }
 
 func (r *ResearchPhase) ReviewTools() []string {
