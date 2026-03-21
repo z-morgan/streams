@@ -131,6 +131,26 @@ func (o *Orchestrator) InitBeads(stealth bool) error {
 	return nil
 }
 
+// PreflightCheck validates prerequisites for stream creation without side effects.
+// Call this synchronously before Create() to catch common issues early.
+func (o *Orchestrator) PreflightCheck() error {
+	repoDir := o.config.RepoDir
+
+	// Verify git HEAD is resolvable.
+	cmd := exec.Command("git", "rev-parse", "--verify", "HEAD")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("cannot resolve HEAD — is the repository initialized with commits?")
+	}
+
+	// Verify bd is available.
+	if _, err := exec.LookPath("bd"); err != nil {
+		return fmt.Errorf("beads CLI (bd) not found in PATH")
+	}
+
+	return nil
+}
+
 // Create creates a new stream backed by a beads parent issue and git worktree.
 // If pipeline is nil/empty, the global config pipeline is used.
 func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints []int, notify stream.NotifySettings, template string, models ...stream.ModelConfig) (*stream.Stream, error) {

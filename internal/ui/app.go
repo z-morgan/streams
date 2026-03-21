@@ -1690,6 +1690,10 @@ func (m Model) createStream(pipeline []string, breakpoints []int, template strin
 	modelConfig := m.newStreamModels
 	fallbackConfig := m.newStreamFallback
 	m.newStreamError = ""
+	if err := m.orch.PreflightCheck(); err != nil {
+		m.newStreamError = err.Error()
+		return m, nil
+	}
 	if m.orch.NeedsBeadsInit() {
 		m.pendingTitle = title
 		m.pendingTask = task
