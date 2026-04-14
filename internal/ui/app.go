@@ -380,6 +380,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateBeadsInit(msg)
 	}
 
+	// Handle async stream creation result before routing to the wizard
+	// overlay. The wizard blocks all input while m.creating is true, so
+	// this message must be handled here to avoid being swallowed.
+	if msg, ok := msg.(streamCreatedMsg); ok {
+		m.creating = false
+		if msg.err != nil {
+			m.newStreamError = msg.err.Error()
+			return m, nil
+		}
+		// Success: close the wizard and start the stream.
+		m.showNewStream = false
+		m.newStreamStep = 0
+		m.newStreamError = ""
+		if err := m.orch.Start(msg.stream.ID); err != nil {
+			m = m.withError("Stream created but failed to start: " + err.Error())
+		}
+		return m, nil
+	}
+
 	// Handle new stream overlay input first if active.
 	if m.showNewStream {
 		return m.updateNewStream(msg)
@@ -453,21 +472,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st, err := orch.Create(title, task, pipeline, breakpoints, notify, template, modelConfig)
 			return streamCreatedMsg{stream: st, err: err}
 		}
-
-	case streamCreatedMsg:
-		m.creating = false
-		if msg.err != nil {
-			m.newStreamError = msg.err.Error()
-			return m, nil
-		}
-		// Success: close the wizard and start the stream.
-		m.showNewStream = false
-		m.newStreamStep = 0
-		m.newStreamError = ""
-		if err := m.orch.Start(msg.stream.ID); err != nil {
-			m = m.withError("Stream created but failed to start: " + err.Error())
-		}
-		return m, nil
 
 	case interruptDoneMsg:
 		m.interrupting = false
