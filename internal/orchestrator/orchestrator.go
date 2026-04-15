@@ -93,7 +93,9 @@ func (o *Orchestrator) SetSink(sink EventSink) {
 	o.mu.Unlock()
 }
 
-// LoadExisting loads all previously persisted streams into memory.
+// LoadExisting loads all previously persisted streams into memory. Any streams
+// with stale StatusRunning (from a previous crash or unclean exit) are reset to
+// StatusStopped since no goroutines are active at load time.
 func (o *Orchestrator) LoadExisting() error {
 	loaded, err := o.store.LoadAll()
 	if err != nil {
@@ -102,6 +104,11 @@ func (o *Orchestrator) LoadExisting() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for _, st := range loaded {
+		if st.Status == stream.StatusRunning {
+			slog.Warn("resetting stale running status", "stream", st.ID)
+			st.Status = stream.StatusStopped
+			st.UpdatedAt = time.Now()
+		}
 		o.streams[st.ID] = st
 		o.snaps[st.ID] = len(st.Snapshots)
 	}
@@ -174,6 +181,10 @@ func (o *Orchestrator) Create(title, task string, pipeline []string, breakpoints
 	if err := createWorktree(repoDir, worktreePath, branch); err != nil {
 		cleanupBeadsParent(parentID, repoDir)
 		return nil, fmt.Errorf("create worktree: %w", err)
+	}
+
+	if err := installGitGuard(worktreePath); err != nil {
+		slog.Warn("failed to install git guard", "err", err)
 	}
 
 	if len(pipeline) == 0 {
@@ -543,11 +554,13 @@ func (o *Orchestrator) Complete(id, branchName string) error {
 		}
 	}
 
-	// Remove the worktree.
+	// Remove the worktree. This is a soft failure — the branch has already been
+	// renamed so we must update stream state regardless to avoid inconsistency
+	// (branch renamed in git but st.Branch still holding the old name).
 	cmd := exec.Command("git", "worktree", "remove", worktree, "--force")
 	cmd.Dir = o.config.RepoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree remove: %s", strings.TrimSpace(string(out)))
+		slog.Warn("git worktree remove failed during complete", "path", worktree, "err", err, "output", strings.TrimSpace(string(out)))
 	}
 
 	st.SetBranch(branchName)
@@ -900,6 +913,38 @@ func (o *Orchestrator) RepoDir() string {
 	return o.config.RepoDir
 }
 
+// Shutdown gracefully cancels all running stream goroutines, waits for them
+// to exit, and persists their final state. Call this before TeardownEnvironments
+// on application exit to prevent stale "running" status on disk.
+func (o *Orchestrator) Shutdown() {
+	o.mu.Lock()
+	cancels := make(map[string]context.CancelFunc, len(o.cancels))
+	doneChans := make(map[string]chan struct{}, len(o.done))
+	for id, cancel := range o.cancels {
+		cancels[id] = cancel
+		doneChans[id] = o.done[id]
+	}
+	o.mu.Unlock()
+
+	if len(cancels) == 0 {
+		return
+	}
+
+	slog.Info("shutting down running streams", "count", len(cancels))
+
+	for _, cancel := range cancels {
+		cancel()
+	}
+
+	for id, doneCh := range doneChans {
+		select {
+		case <-doneCh:
+		case <-time.After(10 * time.Second):
+			slog.Warn("timeout waiting for stream to stop during shutdown", "stream", id)
+		}
+	}
+}
+
 // TeardownEnvironments tears down all active environments. Call on application exit.
 func (o *Orchestrator) TeardownEnvironments() {
 	if o.envManager != nil {
@@ -993,6 +1038,49 @@ func cleanupBeadsParent(id, workDir string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		slog.Warn("cleanup: bd delete failed", "id", id, "err", err, "output", strings.TrimSpace(string(out)))
 	}
+}
+
+// installGitGuard creates a wrapper script in the worktree that blocks
+// cross-branch git operations (cherry-pick, merge, fetch, etc.). The wrapper
+// directory is prepended to PATH when spawning Claude CLI so agents cannot
+// bypass it. The orchestrator's own git commands are unaffected because they
+// use exec.Command directly with the system PATH.
+func installGitGuard(worktreePath string) error {
+	guardDir := filepath.Join(worktreePath, ".streams-guard")
+	if err := os.MkdirAll(guardDir, 0755); err != nil {
+		return fmt.Errorf("create guard dir: %w", err)
+	}
+
+	const script = `#!/bin/sh
+# Streams git guard — blocks cross-branch operations.
+# Agents must implement changes directly, not copy from other branches.
+case "$1" in
+  cherry-pick|merge|pull|fetch|rebase|am|format-patch|apply|bundle|worktree)
+    echo "error: 'git $1' is not allowed in streams worktrees." >&2
+    echo "You must implement changes yourself — do not import code from other branches." >&2
+    exit 128
+    ;;
+esac
+# Resolve real git by removing this directory from PATH.
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+REAL_GIT=""
+IFS=:
+for dir in $PATH; do
+  [ "$dir" = "$SELF_DIR" ] && continue
+  [ -x "$dir/git" ] && REAL_GIT="$dir/git" && break
+done
+unset IFS
+if [ -z "$REAL_GIT" ]; then
+  echo "error: streams git guard: cannot find real git binary" >&2
+  exit 128
+fi
+exec "$REAL_GIT" "$@"
+`
+	guardPath := filepath.Join(guardDir, "git")
+	if err := os.WriteFile(guardPath, []byte(script), 0755); err != nil {
+		return fmt.Errorf("write guard script: %w", err)
+	}
+	return nil
 }
 
 func createWorktree(repoDir, worktreePath, branch string) error {

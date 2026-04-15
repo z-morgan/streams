@@ -173,6 +173,7 @@ func runTUI(orch *orchestrator.Orchestrator, storeRoot string) int {
 		slog.Error("TUI error", "err", err)
 		return 1
 	}
+	orch.Shutdown()
 	orch.TeardownEnvironments()
 	return 0
 }

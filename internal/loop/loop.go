@@ -22,6 +22,8 @@ const orchestratorRules = `## Stream Orchestrator Rules (these override any conf
 - Do NOT start, stop, or restart dev servers.
 - Do NOT run formatters, linters, or other pre-commit tooling unless this prompt explicitly instructs you to.
 - Follow the tool restrictions enforced by --allowedTools. Do not attempt to use tools outside that list.
+- Do NOT use git cherry-pick, git merge, git pull, git fetch, git rebase, git am, git apply, git format-patch, git bundle, or git worktree.
+- Do NOT read, diff, checkout, or show files from other git branches. Your task is to implement changes yourself — never copy work from other branches.
 - All other CLAUDE.md instructions (coding style, naming conventions, test patterns, project structure) remain in effect.`
 
 // PhaseFactory creates a MacroPhase by pipeline phase name.

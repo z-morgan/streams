@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ func (r *Runtime) runJSON(ctx context.Context, req runtime.Request) (*runtime.Re
 	}
 	cmd.Env = appendEnvWithout(cmd.Environ(), "CLAUDECODE")
 	cmd.Env = appendOllamaEnv(cmd.Env, req)
+	cmd.Env = prependGitGuard(cmd.Env, r.WorkDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -103,6 +105,7 @@ func (r *Runtime) runStreaming(ctx context.Context, req runtime.Request) (*runti
 	}
 	cmd.Env = appendEnvWithout(cmd.Environ(), "CLAUDECODE")
 	cmd.Env = appendOllamaEnv(cmd.Env, req)
+	cmd.Env = prependGitGuard(cmd.Env, r.WorkDir)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -341,6 +344,26 @@ func appendOllamaEnv(env []string, req runtime.Request) []string {
 		"ANTHROPIC_AUTH_TOKEN=ollama",
 		"ANTHROPIC_API_KEY=",
 	)
+	return env
+}
+
+// prependGitGuard adds the .streams-guard directory to the front of PATH
+// if it exists in the working directory. This interposes a wrapper script
+// that blocks cross-branch git operations (cherry-pick, merge, fetch, etc.).
+func prependGitGuard(env []string, workDir string) []string {
+	if workDir == "" {
+		return env
+	}
+	guardDir := filepath.Join(workDir, ".streams-guard")
+	if _, err := os.Stat(guardDir); err != nil {
+		return env
+	}
+	for i, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			env[i] = "PATH=" + guardDir + ":" + e[5:]
+			return env
+		}
+	}
 	return env
 }
 
