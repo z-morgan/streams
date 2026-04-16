@@ -66,6 +66,7 @@ type Orchestrator struct {
 	cancels    map[string]context.CancelFunc
 	done       map[string]chan struct{} // closed when loop goroutine exits
 	snaps      map[string]int           // persisted snapshot count per stream
+	pending    sync.WaitGroup           // tracks in-flight Complete/Delete calls
 	store      *store.Store
 	sink       EventSink
 	config     Config
@@ -407,6 +408,9 @@ func (o *Orchestrator) Interrupt(id string) error {
 // git branch and beads issue are also removed. Returns an error if the stream
 // is currently running.
 func (o *Orchestrator) Delete(id string, cleanup bool) error {
+	o.pending.Add(1)
+	defer o.pending.Done()
+
 	o.mu.Lock()
 	st := o.streams[id]
 	if st == nil {
@@ -472,6 +476,9 @@ func (o *Orchestrator) Delete(id string, cleanup bool) error {
 // Complete finalizes a stream by renaming its branch, removing the worktree,
 // and setting status to StatusCompleted.
 func (o *Orchestrator) Complete(id, branchName string) error {
+	o.pending.Add(1)
+	defer o.pending.Done()
+
 	o.mu.Lock()
 	st := o.streams[id]
 	if st == nil {
@@ -943,6 +950,12 @@ func (o *Orchestrator) Shutdown() {
 			slog.Warn("timeout waiting for stream to stop during shutdown", "stream", id)
 		}
 	}
+}
+
+// WaitPending blocks until all in-flight Complete and Delete calls finish.
+// Call before Shutdown to prevent the process from exiting mid-operation.
+func (o *Orchestrator) WaitPending() {
+	o.pending.Wait()
 }
 
 // TeardownEnvironments tears down all active environments. Call on application exit.
