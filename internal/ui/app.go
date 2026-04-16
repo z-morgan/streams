@@ -2318,7 +2318,9 @@ func renderNewStreamOverlay(titleInput, taskInput textarea.Model, step int, temp
 				name = selectedRowStyle.Render(name)
 			}
 			overlay += cursor + name + "\n"
-			overlay += "    " + helpStyle.Render(tmpl.Description) + "\n"
+			if i == templateCursor {
+				overlay += "    " + helpStyle.Render(tmpl.Description) + "\n"
+			}
 		}
 		overlay += "\n" + helpStyle.Render("j/k: navigate  enter: select  esc: back")
 	case 3:
